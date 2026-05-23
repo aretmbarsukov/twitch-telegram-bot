@@ -7,10 +7,8 @@ app.use(express.json({ type: "*/*" }));
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
-const TWITCH_SECRET = process.env.TWITCH_SECRET;
-
-let accessToken = null;
+let streamInfo = {};
+let lastError = "";
 
 const streamers = [
   "ant1ka",
@@ -29,9 +27,6 @@ const streamers = [
   "dankzlv",
   "tadzheek"
 ];
-
-let streamInfo = {};
-let lastError = "";
 
 
 // ===============================
@@ -78,19 +73,6 @@ async function safeAxios(request, streamer = null) {
 
 
 // ===============================
-// 📌 Отримання Twitch токена
-// ===============================
-async function getTwitchToken() {
-  await safeAxios(async () => {
-    const res = await axios.post(
-      `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
-    );
-    accessToken = res.data.access_token;
-  });
-}
-
-
-// ===============================
 // 📌 Перевірка через HTML таймер + назву стріму
 // ===============================
 async function checkStreamByFrontend(streamer) {
@@ -131,10 +113,12 @@ async function checkStreamByFrontend(streamer) {
 
 
 // ===============================
-// 📌 Перевірка одного стрімера
+// 📌 Перевірка одного стрімера (API вимкнено)
 // ===============================
 async function checkStreamer(streamer) {
-  // 1️⃣ API (якщо працює)
+
+  // ❌ API ПЕРЕВІРКА ВИМКНЕНА
+  /*
   const res = await safeAxios(
     () =>
       axios.get(
@@ -152,8 +136,9 @@ async function checkStreamer(streamer) {
   if (res.data.data.length > 0) {
     return res.data.data[0];
   }
+  */
 
-  // 2️⃣ Перевірка через фронтенд (таймер + назва)
+  // ✔ Перевірка через фронтенд (таймер + назва)
   const frontendLive = await checkStreamByFrontend(streamer);
   if (frontendLive) {
     return frontendLive;
@@ -164,85 +149,77 @@ async function checkStreamer(streamer) {
 
 
 // ===============================
-// 📌 Перевірка всіх стрімерів (чанки по 10)
+// 📌 Перевірка всіх стрімерів
 // ===============================
 async function checkStreams() {
-  if (!accessToken) return;
+  for (const streamer of streamers) {
+    const stream = await checkStreamer(streamer);
 
-  const chunkSize = 10;
+    if (stream) {
+      const title = stream.title;
+      const url = `https://twitch.tv/${stream.user_login}`;
+      const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
 
-  for (let i = 0; i < streamers.length; i += chunkSize) {
-    const chunk = streamers.slice(i, i + chunkSize);
+      if (!streamInfo[streamer] || !streamInfo[streamer].online) {
+        const msg = await safeAxios(() =>
+          axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              text
+            }
+          )
+        );
 
-    for (const streamer of chunk) {
-      const stream = await checkStreamer(streamer);
+        streamInfo[streamer] = {
+          messageId: msg.data.result.message_id,
+          title,
+          online: true
+        };
 
-      if (stream) {
-        const title = stream.title;
-        const url = `https://twitch.tv/${stream.user_login}`;
-        const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
+        continue;
+      }
 
-        if (!streamInfo[streamer] || !streamInfo[streamer].online) {
-          const msg = await safeAxios(() =>
-            axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                text
-              }
-            )
-          );
+      if (streamInfo[streamer].title !== title) {
+        await safeAxios(() =>
+          axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              message_id: streamInfo[streamer].messageId
+            }
+          )
+        );
 
-          streamInfo[streamer] = {
-            messageId: msg.data.result.message_id,
-            title,
-            online: true
-          };
+        const msg = await safeAxios(() =>
+          axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              text
+            }
+          )
+        );
 
-          continue;
-        }
+        streamInfo[streamer].messageId = msg.data.result.message_id;
+        streamInfo[streamer].title = title;
+      }
+    } else {
+      if (streamInfo[streamer] && streamInfo[streamer].online) {
+        const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
 
-        if (streamInfo[streamer].title !== title) {
-          await safeAxios(() =>
-            axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                message_id: streamInfo[streamer].messageId
-              }
-            )
-          );
+        await safeAxios(() =>
+          axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              message_id: streamInfo[streamer].messageId,
+              text: offlineText
+            }
+          )
+        );
 
-          const msg = await safeAxios(() =>
-            axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                text
-              }
-            )
-          );
-
-          streamInfo[streamer].messageId = msg.data.result.message_id;
-          streamInfo[streamer].title = title;
-        }
-      } else {
-        if (streamInfo[streamer] && streamInfo[streamer].online) {
-          const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
-
-          await safeAxios(() =>
-            axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                message_id: streamInfo[streamer].messageId,
-                text: offlineText
-              }
-            )
-          );
-
-          streamInfo[streamer].online = false;
-        }
+        streamInfo[streamer].online = false;
       }
     }
   }
@@ -261,7 +238,5 @@ app.get("/", (req, res) => {
 // 📌 Запуск
 // ===============================
 app.listen(process.env.PORT || 3000, async () => {
-  await getTwitchToken();
-  setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
   setInterval(checkStreams, 30 * 1000);
 });

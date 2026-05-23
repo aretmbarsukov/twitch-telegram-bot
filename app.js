@@ -12,7 +12,6 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
-// СПИСОК СТРІМЕРІВ
 const streamers = [
   "ant1ka",
   "steel",
@@ -92,7 +91,7 @@ async function getTwitchToken() {
 
 
 // ===============================
-// 📌 ДОДАТКОВА ПЕРЕВІРКА ПО ПОСИЛАННЮ
+// 📌 Fallback: визначення справжнього логіну через URL
 // ===============================
 async function resolveRealLogin(name) {
   try {
@@ -121,6 +120,36 @@ async function resolveRealLogin(name) {
 
 
 // ===============================
+// 📌 HTML-перевірка (останній fallback)
+// ===============================
+async function checkHTMLStream(streamer) {
+  try {
+    const url = `https://www.twitch.tv/${streamer}`;
+    const res = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
+
+    const html = res.data;
+
+    if (
+      html.includes('property="og:video"') ||
+      html.includes('"isLiveBroadcast":true')
+    ) {
+      console.log(`HTML STREAM DETECTED → ${streamer}`);
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.log("HTML check error:", err);
+    return false;
+  }
+}
+
+
+// ===============================
 // 📌 Перевірка одного стрімера
 // ===============================
 async function checkStreamer(streamer) {
@@ -143,7 +172,7 @@ async function checkStreamer(streamer) {
     return res.data.data[0];
   }
 
-  // 2️⃣ Якщо API не бачить → fallback по URL
+  // 2️⃣ fallback по URL
   const realLogin = await resolveRealLogin(streamer);
 
   if (realLogin !== streamer) {
@@ -164,6 +193,16 @@ async function checkStreamer(streamer) {
     if (res2.data.data.length > 0) {
       return res2.data.data[0];
     }
+  }
+
+  // 3️⃣ HTML-перевірка
+  const htmlLive = await checkHTMLStream(streamer);
+
+  if (htmlLive) {
+    return {
+      user_login: streamer,
+      title: "LIVE (HTML DETECTED)"
+    };
   }
 
   return null;

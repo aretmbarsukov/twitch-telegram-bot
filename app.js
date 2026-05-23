@@ -26,7 +26,7 @@ const streamers = [
   "art009228"
 ];
 
-// ✔️ Зберігаємо, хто вже онлайн (щоб не дублювати повідомлення)
+// ✔️ Зберігаємо, хто вже онлайн (антидубль)
 let onlineStatus = {};
 
 // ✔️ Отримуємо Twitch токен
@@ -42,7 +42,7 @@ async function getTwitchToken() {
   }
 }
 
-// ✔️ Перевіряємо, хто онлайн
+// ✔️ Перевіряємо стріми
 async function checkStreams() {
   if (!accessToken) return;
 
@@ -60,15 +60,17 @@ async function checkStreams() {
 
       const isOnline = res.data.data.length > 0;
 
-      // Якщо стрімер онлайн і ми ще не надсилали повідомлення
+      // 🔥 Якщо стрімер онлайн і ми ще не надсилали повідомлення
       if (isOnline && !onlineStatus[streamer]) {
         onlineStatus[streamer] = true;
+
+        const streamUrl = `https://twitch.tv/${streamer}`;
 
         await axios.post(
           `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
           {
             chat_id: TELEGRAM_CHAT_ID,
-            text: `🔴 ${streamer} запустив стрім на Twitch!`
+            text: `🔴 ${streamer} запустив стрім на Twitch!\n👉 ${streamUrl}`
           }
         );
 

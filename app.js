@@ -35,7 +35,7 @@ let streamInfo = {};
 
 
 // ===============================
-// 📌 ФУНКЦІЯ: Надіслати помилку в Telegram
+// 📌 Надсилання помилки в Telegram
 // ===============================
 async function sendErrorToTelegram(error, streamer = null) {
   const text =
@@ -189,7 +189,6 @@ async function checkStreams() {
         }
       }
     } catch (err) {
-      // safeAxios вже відправив помилку в Telegram
       console.log(`Помилка у стрімера ${streamer}:`, err.response?.data || err);
     }
   }

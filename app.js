@@ -20,9 +20,7 @@ const streamers = [
   "ravshanbtw",
   "anarabdullaev",
   "kerimch1k",
-  "renatkobmw",
-  "bratishkinoff",
-  "evelon2004"
+  "renatkobmw"
 ];
 
 let streamInfo = {};
@@ -100,11 +98,8 @@ async function resolveRealLogin(name) {
       .split("?")[0]
       .trim();
 
-    console.log(`Resolved ${name} → ${login}`);
-
     return login;
   } catch (err) {
-    console.log("resolveRealLogin error:", err);
     return name;
   }
 }
@@ -127,14 +122,10 @@ async function checkHTMLStream(streamer) {
     if (!match) return false;
 
     const streamData = JSON.parse(match[1]);
-    if (streamData && streamData.id) {
-      console.log(`HTML STREAM DETECTED → ${streamer}`);
-      return true;
-    }
+    if (streamData && streamData.id) return true;
 
     return false;
-  } catch (err) {
-    console.log("HTML check error:", err);
+  } catch {
     return false;
   }
 }
@@ -175,9 +166,7 @@ async function checkM3U8Stream(streamer) {
     });
 
     const data = tokenRes.data?.[0]?.data?.streamPlaybackAccessToken;
-    if (!data || !data.signature || !data.value) {
-      return false;
-    }
+    if (!data || !data.signature || !data.value) return false;
 
     const sig = data.signature;
     const token = encodeURIComponent(data.value);
@@ -192,13 +181,10 @@ async function checkM3U8Stream(streamer) {
     });
 
     if (m3u8Res.status !== 200) return false;
-    if (typeof m3u8Res.data !== "string") return false;
     if (!m3u8Res.data.includes("#EXTM3U")) return false;
 
-    console.log(`M3U8 STREAM DETECTED → ${streamer}`);
     return true;
-  } catch (err) {
-    console.log("m3u8 check error:", err);
+  } catch {
     return false;
   }
 }
@@ -250,22 +236,22 @@ async function checkStreamer(streamer) {
   }
 
   // 3️⃣ HTML
-  const htmlLive = await checkHTMLStream(streamer);
-  if (htmlLive) {
+  if (await checkHTMLStream(streamer)) {
     return {
       user_login: streamer,
       title: "LIVE (HTML DETECTED)",
-      game_name: "Unknown"
+      game_name: "Unknown",
+      started_at: new Date().toISOString()
     };
   }
 
   // 4️⃣ m3u8
-  const m3u8Live = await checkM3U8Stream(streamer);
-  if (m3u8Live) {
+  if (await checkM3U8Stream(streamer)) {
     return {
       user_login: streamer,
       title: "LIVE (M3U8 DETECTED)",
-      game_name: "Unknown"
+      game_name: "Unknown",
+      started_at: new Date().toISOString()
     };
   }
 
@@ -291,6 +277,7 @@ async function checkStreams() {
         `📝 ${title}\n` +
         `🔗 https://twitch.tv/${stream.user_login}`;
 
+      // 🟢 НОВИЙ СТРИМ
       if (!streamInfo[streamer] || !streamInfo[streamer].online) {
         const msg = await safeAxios(() =>
           axios.post(
@@ -307,12 +294,16 @@ async function checkStreams() {
           messageId: msg.data.result.message_id,
           title,
           category,
+          startedAt: stream.started_at
+            ? new Date(stream.started_at)
+            : new Date(),
           online: true
         };
 
         continue;
       }
 
+      // 🔄 ОНОВЛЕННЯ НАЗВИ / КАТЕГОРІЇ
       if (
         streamInfo[streamer].title !== title ||
         streamInfo[streamer].category !== category
@@ -342,9 +333,24 @@ async function checkStreams() {
         streamInfo[streamer].title = title;
         streamInfo[streamer].category = category;
       }
-    } else {
+    }
+
+    // 🔴 СТРИМ ЗАКІНЧИВСЯ
+    else {
       if (streamInfo[streamer] && streamInfo[streamer].online) {
-        const offlineText = `🔴 *${streamer}*\nСтрім закінчився`;
+        const start = streamInfo[streamer].startedAt;
+        const end = new Date();
+
+        const diff = Math.floor((end - start) / 1000);
+        const hours = Math.floor(diff / 3600);
+        const minutes = Math.floor((diff % 3600) / 60);
+
+        const offlineText =
+          `🔴 *${streamer}*\n` +
+          `Стрім закінчився\n` +
+          `🟢 Почався: ${start.toLocaleString()}\n` +
+          `🔴 Закінчився: ${end.toLocaleString()}\n` +
+          `⏱️ Тривалість: ${hours} год ${minutes} хв`;
 
         await safeAxios(() =>
           axios.post(

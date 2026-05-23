@@ -91,38 +91,9 @@ async function getTwitchToken() {
 
 
 // ===============================
-// 📌 Fallback: визначення справжнього логіну через URL
+// 📌 Перевірка через HTML таймер + назву стріму
 // ===============================
-async function resolveRealLogin(name) {
-  try {
-    const url = `https://www.twitch.tv/${name}`;
-
-    const res = await axios.head(url, {
-      maxRedirects: 5,
-      validateStatus: () => true
-    });
-
-    const finalUrl = res.request.res.responseUrl;
-
-    const login = finalUrl
-      .replace("https://www.twitch.tv/", "")
-      .split("?")[0]
-      .trim();
-
-    console.log(`Resolved ${name} → ${login}`);
-
-    return login;
-  } catch (err) {
-    console.log("resolveRealLogin error:", err);
-    return name;
-  }
-}
-
-
-// ===============================
-// 📌 ТОЧНА HTML-перевірка (stream.id у JSON)
-// ===============================
-async function checkHTMLStream(streamer) {
+async function checkStreamByFrontend(streamer) {
   try {
     const url = `https://www.twitch.tv/${streamer}`;
     const res = await axios.get(url, {
@@ -133,84 +104,28 @@ async function checkHTMLStream(streamer) {
 
     const html = res.data;
 
-    const match = html.match(/"stream":({.*?})/);
-    if (!match) return false;
+    // 1️⃣ Перевірка таймера стріму
+    const liveTimeMatch = html.match(/<span class="live-time">([\s\S]*?)<\/span>/);
 
-    const streamData = JSON.parse(match[1]);
-    if (streamData && streamData.id) {
-      console.log(`HTML STREAM DETECTED → ${streamer}`);
-      return true;
+    if (!liveTimeMatch) {
+      return null; // стрім не йде
     }
 
-    return false;
+    // 2️⃣ Назва стріму
+    const titleMatch = html.match(/data-a-target="stream-title"[^>]*>(.*?)<\/p>/);
+
+    const title = titleMatch
+      ? titleMatch[1].replace(/<[^>]+>/g, "").trim()
+      : "LIVE STREAM";
+
+    return {
+      user_login: streamer,
+      title
+    };
+
   } catch (err) {
-    console.log("HTML check error:", err);
-    return false;
-  }
-}
-
-
-// ===============================
-// 📌 m3u8‑детектор через GraphQL + usher
-// ===============================
-async function checkM3U8Stream(streamer) {
-  try {
-    const gqlUrl = "https://gql.twitch.tv/gql";
-    const clientId = "kimne78kx3ncx6brgo4mv6wki5h1ko"; // публічний web client
-
-    const body = [
-      {
-        operationName: "PlaybackAccessToken_Template",
-        variables: {
-          isLive: true,
-          login: streamer,
-          isVod: false,
-          vodID: "",
-          playerType: "site"
-        },
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash:
-              "0828119ded1c1347794d5f1c9a1e9c1f9c9e1e5c2f9f9c1f9b9c9e9f9d9c9e9"
-          }
-        }
-      }
-    ];
-
-    const tokenRes = await axios.post(gqlUrl, body, {
-      headers: {
-        "Client-ID": clientId,
-        "Content-Type": "application/json"
-      }
-    });
-
-    const data = tokenRes.data?.[0]?.data?.streamPlaybackAccessToken;
-    if (!data || !data.signature || !data.value) {
-      return false;
-    }
-
-    const sig = data.signature;
-    const token = encodeURIComponent(data.value);
-
-    const m3u8Url = `https://usher.ttvnw.net/api/channel/hls/${streamer}.m3u8?client_id=${clientId}&sig=${sig}&token=${token}&allow_source=true&allow_audio_only=true`;
-
-    const m3u8Res = await axios.get(m3u8Url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      },
-      validateStatus: () => true
-    });
-
-    if (m3u8Res.status !== 200) return false;
-    if (typeof m3u8Res.data !== "string") return false;
-    if (!m3u8Res.data.includes("#EXTM3U")) return false;
-
-    console.log(`M3U8 STREAM DETECTED → ${streamer}`);
-    return true;
-  } catch (err) {
-    console.log("m3u8 check error:", err);
-    return false;
+    console.log("Frontend check error:", err);
+    return null;
   }
 }
 
@@ -219,7 +134,7 @@ async function checkM3U8Stream(streamer) {
 // 📌 Перевірка одного стрімера
 // ===============================
 async function checkStreamer(streamer) {
-  // 1️⃣ API
+  // 1️⃣ API (якщо працює)
   const res = await safeAxios(
     () =>
       axios.get(
@@ -238,45 +153,10 @@ async function checkStreamer(streamer) {
     return res.data.data[0];
   }
 
-  // 2️⃣ URL fallback
-  const realLogin = await resolveRealLogin(streamer);
-
-  if (realLogin !== streamer) {
-    const res2 = await safeAxios(
-      () =>
-        axios.get(
-          `https://api.twitch.tv/helix/streams?user_login=${realLogin}`,
-          {
-            headers: {
-              "Client-ID": TWITCH_CLIENT_ID,
-              Authorization: `Bearer ${accessToken}`
-            }
-          }
-        ),
-      realLogin
-    );
-
-    if (res2.data.data.length > 0) {
-      return res2.data.data[0];
-    }
-  }
-
-  // 3️⃣ HTML
-  const htmlLive = await checkHTMLStream(streamer);
-  if (htmlLive) {
-    return {
-      user_login: streamer,
-      title: "LIVE (HTML DETECTED)"
-    };
-  }
-
-  // 4️⃣ m3u8
-  const m3u8Live = await checkM3U8Stream(streamer);
-  if (m3u8Live) {
-    return {
-      user_login: streamer,
-      title: "LIVE (M3U8 DETECTED)"
-    };
+  // 2️⃣ Перевірка через фронтенд (таймер + назва)
+  const frontendLive = await checkStreamByFrontend(streamer);
+  if (frontendLive) {
+    return frontendLive;
   }
 
   return null;

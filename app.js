@@ -12,6 +12,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
+// СПИСОК СТРІМЕРІВ
 const streamers = [
   "steel",
   "ravshann",
@@ -32,30 +33,78 @@ const streamers = [
 
 let streamInfo = {};
 
-async function getTwitchToken() {
+
+// ===============================
+// 📌 ФУНКЦІЯ: Надіслати помилку в Telegram
+// ===============================
+async function sendErrorToTelegram(error, streamer = null) {
+  const text =
+    `🔥 *BOT ERROR ALERT*\n\n` +
+    (streamer ? `Стрімер: *${streamer}*\n\n` : "") +
+    `❗ Помилка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
+    `🕒 Час: ${new Date().toISOString()}`;
+
   try {
+    await axios.post(
+      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+      {
+        chat_id: TELEGRAM_CHAT_ID,
+        text,
+        parse_mode: "Markdown"
+      }
+    );
+  } catch (err) {
+    console.log("Помилка надсилання помилки в Telegram:", err);
+  }
+}
+
+
+// ===============================
+// 📌 safeAxios — будь-яка помилка → в Telegram
+// ===============================
+async function safeAxios(request, streamer = null) {
+  try {
+    return await request();
+  } catch (err) {
+    await sendErrorToTelegram(err, streamer);
+    throw err;
+  }
+}
+
+
+// ===============================
+// 📌 Отримання Twitch токена
+// ===============================
+async function getTwitchToken() {
+  await safeAxios(async () => {
     const res = await axios.post(
       `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
     );
     accessToken = res.data.access_token;
-  } catch (err) {
-    console.log("Помилка отримання токена Twitch:", err.response?.data || err);
-  }
+  });
 }
 
+
+// ===============================
+// 📌 Перевірка стрімів
+// ===============================
 async function checkStreams() {
   if (!accessToken) return;
 
   for (const streamer of streamers) {
     try {
-      const res = await axios.get(
-        `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
-        {
-          headers: {
-            "Client-ID": TWITCH_CLIENT_ID,
-            Authorization: `Bearer ${accessToken}`
-          }
-        }
+      const res = await safeAxios(
+        () =>
+          axios.get(
+            `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
+            {
+              headers: {
+                "Client-ID": TWITCH_CLIENT_ID,
+                Authorization: `Bearer ${accessToken}`
+              }
+            }
+          ),
+        streamer
       );
 
       const isOnline = res.data.data.length > 0;
@@ -67,46 +116,53 @@ async function checkStreams() {
 
         // Якщо стрімер онлайн вперше
         if (!streamInfo[streamer] || !streamInfo[streamer].online) {
-          const msg = await axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text: text
-            }
+          const msg = await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  text
+                }
+              ),
+            streamer
           );
 
           streamInfo[streamer] = {
             messageId: msg.data.result.message_id,
-            title: title,
+            title,
             online: true
           };
 
           continue;
         }
 
-        // Якщо назва змінилась → видаляємо старе повідомлення і надсилаємо нове
+        // Якщо назва змінилась
         if (streamInfo[streamer].title !== title) {
-          console.log(`Назва змінилась у ${streamer}: ${title}`);
-
-          // Видаляємо старе повідомлення
-          await axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId
-            }
+          await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  message_id: streamInfo[streamer].messageId
+                }
+              ),
+            streamer
           );
 
-          // Надсилаємо нове
-          const msg = await axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text: text
-            }
+          const msg = await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  text
+                }
+              ),
+            streamer
           );
 
-          // Оновлюємо дані
           streamInfo[streamer].messageId = msg.data.result.message_id;
           streamInfo[streamer].title = title;
         }
@@ -116,24 +172,40 @@ async function checkStreams() {
         if (streamInfo[streamer] && streamInfo[streamer].online) {
           const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
 
-          await axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId,
-              text: offlineText
-            }
+          await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  message_id: streamInfo[streamer].messageId,
+                  text: offlineText
+                }
+              ),
+            streamer
           );
 
           streamInfo[streamer].online = false;
         }
       }
     } catch (err) {
+      // safeAxios вже відправив помилку в Telegram
       console.log(`Помилка у стрімера ${streamer}:`, err.response?.data || err);
     }
   }
 }
 
+
+// ===============================
+// 📌 Глобальні ловці помилок
+// ===============================
+process.on("unhandledRejection", (err) => sendErrorToTelegram(err));
+process.on("uncaughtException", (err) => sendErrorToTelegram(err));
+
+
+// ===============================
+// 📌 Express
+// ===============================
 app.get("/", (req, res) => {
   res.send("Bot is running");
 });

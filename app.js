@@ -2,7 +2,7 @@ import express from "express";
 import axios from "axios";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ type: "*/*" }));
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;

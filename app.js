@@ -72,5 +72,14 @@ app.post("/twitch", async (req, res) => {
 app.listen(process.env.PORT || 3000, async () => {
   console.log("Bot running on Render");
   await getTwitchToken();
-  await subscribeToStream("ТУТ_ЛОГІН_СТРІМЕРА");
+
+  await subscribeToStream("steel");
+  await subscribeToStream("ravshann");
+  await subscribeToStream("renatko");
+  await subscribeToStream("bratishkinoff");
+  await subscribeToStream("steelaaga");
+  await subscribeToStream("ravshanbtw");
+  await subscribeToStream("anarabdullaev");
+
+  console.log("All subscriptions created");
 });

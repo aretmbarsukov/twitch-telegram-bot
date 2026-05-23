@@ -14,6 +14,7 @@ let accessToken = null;
 
 // СПИСОК СТРІМЕРІВ (як раніше)
 const streamers = [
+  "ant1ka",
   "steel",
   "ravshann",
   "renatko",
@@ -21,8 +22,7 @@ const streamers = [
   "ravshanbtw",
   "anarabdullaev",
   "kerimch1k",
-  "renatkobmw",
-  "ant1ka",   // ← залишаєш як є
+  "renatkobmw",  
   "dedadam",
   "vitollo_13",
   "chpokoff",

@@ -56,47 +56,53 @@ async function checkStreams() {
       if (isOnline) {
         const title = res.data.data[0].title;
         const url = `https://twitch.tv/${streamer}`;
+        const text = `🟢 ${streamer}\n${title}\n${url}`;
 
         if (!streamInfo[streamer]) {
           const msg = await axios.post(
             `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
             {
               chat_id: TELEGRAM_CHAT_ID,
-              text: `🔴 ${streamer} запустил стрим\n${title}\n${url}`
+              text: text
             }
           );
 
           streamInfo[streamer] = {
             messageId: msg.data.result.message_id,
-            title: title
+            title: title,
+            online: true
           };
         } else {
           if (streamInfo[streamer].title !== title) {
-            await axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                message_id: streamInfo[streamer].messageId
-              }
-            );
-
             const msg = await axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
               {
                 chat_id: TELEGRAM_CHAT_ID,
-                text: `🔴 ${streamer} обновил название стрима\n${title}\n${url}`
+                message_id: streamInfo[streamer].messageId,
+                text: text
               }
             );
 
-            streamInfo[streamer] = {
-              messageId: msg.data.result.message_id,
-              title: title
-            };
+            streamInfo[streamer].title = title;
           }
         }
       } else {
-        if (streamInfo[streamer]) {
-          delete streamInfo[streamer];
+        if (streamInfo[streamer] && streamInfo[streamer].online) {
+          const old = streamInfo[streamer];
+
+          const offlineText =
+            `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+
+          await axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              message_id: old.messageId,
+              text: offlineText
+            }
+          );
+
+          streamInfo[streamer].online = false;
         }
       }
     } catch (err) {}

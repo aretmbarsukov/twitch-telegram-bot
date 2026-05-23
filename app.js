@@ -27,14 +27,14 @@ let streamInfo = {};
 let lastError = "";
 
 // ===============================
-// 📌 Надсилання помилки в Telegram
+// 📌 Отправка ошибок в Telegram
 // ===============================
 async function sendErrorToTelegram(error, streamer = null) {
   const text =
-    `🔥 *BOT ERROR ALERT*\n\n` +
-    (streamer ? `Стрімер: *${streamer}*\n\n` : "") +
-    `❗ Помилка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
-    `🕒 Час: ${new Date().toISOString()}`;
+    `🔥 *ОШИБКА В БОТЕ*\n\n` +
+    (streamer ? `Стример: *${streamer}*\n\n` : "") +
+    `❗ Ошибка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
+    `🕒 Время: ${new Date().toISOString()}`;
 
   if (text === lastError) return;
   lastError = text;
@@ -48,13 +48,11 @@ async function sendErrorToTelegram(error, streamer = null) {
         parse_mode: "Markdown"
       }
     );
-  } catch (err) {
-    console.log("Помилка надсилання помилки в Telegram:", err);
-  }
+  } catch {}
 }
 
 // ===============================
-// 📌 safeAxios — ловить помилки
+// 📌 safeAxios
 // ===============================
 async function safeAxios(request, streamer = null) {
   try {
@@ -68,7 +66,7 @@ async function safeAxios(request, streamer = null) {
 }
 
 // ===============================
-// 📌 Отримання Twitch токена
+// 📌 Получение Twitch токена
 // ===============================
 async function getTwitchToken() {
   await safeAxios(async () => {
@@ -80,7 +78,7 @@ async function getTwitchToken() {
 }
 
 // ===============================
-// 📌 Fallback: визначення справжнього логіну через URL
+// 📌 Fallback: определение реального логина
 // ===============================
 async function resolveRealLogin(name) {
   try {
@@ -99,21 +97,19 @@ async function resolveRealLogin(name) {
       .trim();
 
     return login;
-  } catch (err) {
+  } catch {
     return name;
   }
 }
 
 // ===============================
-// 📌 HTML-перевірка (stream.id у JSON)
+// 📌 HTML fallback
 // ===============================
 async function checkHTMLStream(streamer) {
   try {
     const url = `https://www.twitch.tv/${streamer}`;
     const res = await axios.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
+      headers: { "User-Agent": "Mozilla/5.0" }
     });
 
     const html = res.data;
@@ -122,16 +118,14 @@ async function checkHTMLStream(streamer) {
     if (!match) return false;
 
     const streamData = JSON.parse(match[1]);
-    if (streamData && streamData.id) return true;
-
-    return false;
+    return !!streamData.id;
   } catch {
     return false;
   }
 }
 
 // ===============================
-// 📌 m3u8‑детектор
+// 📌 m3u8 fallback
 // ===============================
 async function checkM3U8Stream(streamer) {
   try {
@@ -174,23 +168,18 @@ async function checkM3U8Stream(streamer) {
     const m3u8Url = `https://usher.ttvnw.net/api/channel/hls/${streamer}.m3u8?client_id=${clientId}&sig=${sig}&token=${token}&allow_source=true&allow_audio_only=true`;
 
     const m3u8Res = await axios.get(m3u8Url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      },
+      headers: { "User-Agent": "Mozilla/5.0" },
       validateStatus: () => true
     });
 
-    if (m3u8Res.status !== 200) return false;
-    if (!m3u8Res.data.includes("#EXTM3U")) return false;
-
-    return true;
+    return m3u8Res.status === 200 && m3u8Res.data.includes("#EXTM3U");
   } catch {
     return false;
   }
 }
 
 // ===============================
-// 📌 Перевірка одного стрімера
+// 📌 Проверка одного стримера
 // ===============================
 async function checkStreamer(streamer) {
   // 1️⃣ API
@@ -208,9 +197,7 @@ async function checkStreamer(streamer) {
     streamer
   );
 
-  if (res.data.data.length > 0) {
-    return res.data.data[0];
-  }
+  if (res.data.data.length > 0) return res.data.data[0];
 
   // 2️⃣ URL fallback
   const realLogin = await resolveRealLogin(streamer);
@@ -230,27 +217,25 @@ async function checkStreamer(streamer) {
       realLogin
     );
 
-    if (res2.data.data.length > 0) {
-      return res2.data.data[0];
-    }
+    if (res2.data.data.length > 0) return res2.data.data[0];
   }
 
-  // 3️⃣ HTML
+  // 3️⃣ HTML fallback
   if (await checkHTMLStream(streamer)) {
     return {
       user_login: streamer,
-      title: "LIVE (HTML DETECTED)",
-      game_name: "Unknown",
+      title: "LIVE (HTML)",
+      game_name: "Неизвестно",
       started_at: new Date().toISOString()
     };
   }
 
-  // 4️⃣ m3u8
+  // 4️⃣ m3u8 fallback
   if (await checkM3U8Stream(streamer)) {
     return {
       user_login: streamer,
-      title: "LIVE (M3U8 DETECTED)",
-      game_name: "Unknown",
+      title: "LIVE (M3U8)",
+      game_name: "Неизвестно",
       started_at: new Date().toISOString()
     };
   }
@@ -259,7 +244,7 @@ async function checkStreamer(streamer) {
 }
 
 // ===============================
-// 📌 Перевірка всіх стрімерів
+// 📌 Проверка всех стримеров
 // ===============================
 async function checkStreams() {
   if (!accessToken) return;
@@ -268,16 +253,16 @@ async function checkStreams() {
     const stream = await checkStreamer(streamer);
 
     if (stream) {
-      const title = stream.title || "Без назви";
-      const category = stream.game_name || "Без категорії";
+      const title = stream.title || "Без названия";
+      const category = stream.game_name || "Без категории";
 
       const text =
         `🟢 *${stream.user_login}*\n` +
-        `🎮 *${category}*\n` +
-        `📝 ${title}\n` +
+        `🎮 Категория: *${category}*\n` +
+        `📝 Название: ${title}\n` +
         `🔗 https://twitch.tv/${stream.user_login}`;
 
-      // 🟢 НОВИЙ СТРИМ
+      // 🟢 Новый стрим
       if (!streamInfo[streamer] || !streamInfo[streamer].online) {
         const msg = await safeAxios(() =>
           axios.post(
@@ -303,7 +288,7 @@ async function checkStreams() {
         continue;
       }
 
-      // 🔄 ОНОВЛЕННЯ НАЗВИ / КАТЕГОРІЇ
+      // 🔄 Обновление названия/категории
       if (
         streamInfo[streamer].title !== title ||
         streamInfo[streamer].category !== category
@@ -335,7 +320,7 @@ async function checkStreams() {
       }
     }
 
-    // 🔴 СТРИМ ЗАКІНЧИВСЯ
+    // 🔴 Стрим завершён
     else {
       if (streamInfo[streamer] && streamInfo[streamer].online) {
         const start = streamInfo[streamer].startedAt;
@@ -347,10 +332,10 @@ async function checkStreams() {
 
         const offlineText =
           `🔴 *${streamer}*\n` +
-          `Стрім закінчився\n` +
-          `🟢 Почався: ${start.toLocaleString()}\n` +
-          `🔴 Закінчився: ${end.toLocaleString()}\n` +
-          `⏱️ Тривалість: ${hours} год ${minutes} хв`;
+          `Стрим завершён\n` +
+          `🟢 Начался: ${start.toLocaleString()}\n` +
+          `🔴 Завершился: ${end.toLocaleString()}\n` +
+          `⏱️ Длился: ${hours} ч ${minutes} мин`;
 
         await safeAxios(() =>
           axios.post(

@@ -12,7 +12,6 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
-// ✔️ Список стрімерів
 const streamers = [
   "steel",
   "ravshann",
@@ -26,23 +25,17 @@ const streamers = [
   "art009228"
 ];
 
-// ✔️ Зберігаємо, хто вже онлайн (антидубль)
-let onlineStatus = {};
+let streamInfo = {};
 
-// ✔️ Отримуємо Twitch токен
 async function getTwitchToken() {
   try {
     const res = await axios.post(
       `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
     );
     accessToken = res.data.access_token;
-    console.log("Twitch token received");
-  } catch (err) {
-    console.error("Error getting Twitch token:", err.message);
-  }
+  } catch (err) {}
 }
 
-// ✔️ Перевіряємо стріми
 async function checkStreams() {
   if (!accessToken) return;
 
@@ -60,47 +53,62 @@ async function checkStreams() {
 
       const isOnline = res.data.data.length > 0;
 
-      // 🔥 Якщо стрімер онлайн і ми ще не надсилали повідомлення
-      if (isOnline && !onlineStatus[streamer]) {
-        onlineStatus[streamer] = true;
+      if (isOnline) {
+        const title = res.data.data[0].title;
+        const url = `https://twitch.tv/${streamer}`;
 
-        const streamUrl = `https://twitch.tv/${streamer}`;
+        if (!streamInfo[streamer]) {
+          const msg = await axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              text: `🔴 ${streamer} запустил стрим\n${title}\n${url}`
+            }
+          );
 
-        await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-          {
-            chat_id: TELEGRAM_CHAT_ID,
-            text: `🔴 ${streamer} запустив стрім на Twitch!\n👉 ${streamUrl}`
+          streamInfo[streamer] = {
+            messageId: msg.data.result.message_id,
+            title: title
+          };
+        } else {
+          if (streamInfo[streamer].title !== title) {
+            await axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                message_id: streamInfo[streamer].messageId
+              }
+            );
+
+            const msg = await axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                text: `🔴 ${streamer} обновил название стрима\n${title}\n${url}`
+              }
+            );
+
+            streamInfo[streamer] = {
+              messageId: msg.data.result.message_id,
+              title: title
+            };
           }
-        );
-
-        console.log(`Notification sent: ${streamer}`);
+        }
+      } else {
+        if (streamInfo[streamer]) {
+          delete streamInfo[streamer];
+        }
       }
-
-      // Якщо стрімер офлайн — скидаємо статус
-      if (!isOnline) {
-        onlineStatus[streamer] = false;
-      }
-
-    } catch (err) {
-      console.error(`Error checking ${streamer}:`, err.message);
-    }
+    } catch (err) {}
   }
 }
 
-// ✔️ Головна сторінка
 app.get("/", (req, res) => {
-  res.send("Bot is running (Polling mode)");
+  res.send("Bot is running");
 });
 
-// ✔️ Запуск сервера
 app.listen(process.env.PORT || 3000, async () => {
-  console.log("Bot running on Render (Polling mode)");
   await getTwitchToken();
-
-  // Оновлюємо токен кожні 3 години
   setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
-
-  // Перевіряємо стрімерів кожні 30 секунд
   setInterval(checkStreams, 30 * 1000);
 });

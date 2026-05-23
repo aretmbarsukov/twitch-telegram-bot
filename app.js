@@ -12,7 +12,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
-// СПИСОК СТРІМЕРІВ
+// СПИСОК СТРІМЕРІВ (як раніше)
 const streamers = [
   "steel",
   "ravshann",
@@ -22,7 +22,7 @@ const streamers = [
   "anarabdullaev",
   "kerimch1k",
   "renatkobmw",
-  "ant1ka",   // ← ТВОЙ ВАРІАНТ
+  "ant1ka",   // ← тут залишаєш як є
   "dedadam",
   "vitollo_13",
   "chpokoff",
@@ -32,7 +32,7 @@ const streamers = [
 ];
 
 let streamInfo = {};
-let lastError = ""; // антиспам помилок
+let lastError = "";
 
 
 // ===============================
@@ -69,10 +69,7 @@ async function sendErrorToTelegram(error, streamer = null) {
 async function safeAxios(request, streamer = null) {
   try {
     const result = await request();
-
-    // якщо запит успішний — очищаємо lastError
     lastError = "";
-
     return result;
   } catch (err) {
     await sendErrorToTelegram(err, streamer);
@@ -95,11 +92,39 @@ async function getTwitchToken() {
 
 
 // ===============================
-// 📌 Fallback — перевірка одного стрімера
+// 📌 ВИЗНАЧЕННЯ СПРАВЖНЬОГО LOGIN ЧЕРЕЗ URL
 // ===============================
-async function checkSingleStreamer(streamer) {
-  console.log("FALLBACK CHECK:", streamer);
+async function resolveRealLogin(name) {
+  try {
+    const url = `https://www.twitch.tv/${name}`;
 
+    const res = await axios.head(url, {
+      maxRedirects: 5,
+      validateStatus: () => true
+    });
+
+    const finalUrl = res.request.res.responseUrl;
+
+    const login = finalUrl
+      .replace("https://www.twitch.tv/", "")
+      .split("?")[0]
+      .trim();
+
+    console.log(`Resolved ${name} → ${login}`);
+
+    return login;
+  } catch (err) {
+    console.log("resolveRealLogin error:", err);
+    return name;
+  }
+}
+
+
+// ===============================
+// 📌 Перевірка одного стрімера
+// ===============================
+async function checkStreamer(streamer) {
+  // 1️⃣ Перевірка по логіну
   const res = await safeAxios(
     () =>
       axios.get(
@@ -114,61 +139,50 @@ async function checkSingleStreamer(streamer) {
     streamer
   );
 
-  console.log("FALLBACK RESPONSE:", streamer, res.data);
+  if (res.data.data.length > 0) {
+    return res.data.data[0];
+  }
 
-  return res.data.data.length > 0 ? res.data.data[0] : null;
+  // 2️⃣ Якщо не знайдено — fallback через URL
+  const realLogin = await resolveRealLogin(streamer);
+
+  if (realLogin !== streamer) {
+    const res2 = await safeAxios(
+      () =>
+        axios.get(
+          `https://api.twitch.tv/helix/streams?user_login=${realLogin}`,
+          {
+            headers: {
+              "Client-ID": TWITCH_CLIENT_ID,
+              Authorization: `Bearer ${accessToken}`
+            }
+          }
+        ),
+      realLogin
+    );
+
+    if (res2.data.data.length > 0) {
+      return res2.data.data[0];
+    }
+  }
+
+  return null;
 }
 
 
 // ===============================
-// 📌 Перевірка стрімів (2 рівні)
+// 📌 Перевірка всіх стрімерів
 // ===============================
 async function checkStreams() {
   if (!accessToken) return;
 
-  console.log("=== CHECKING STREAMS ===");
-
-  // 1️⃣ РІВЕНЬ — один запит на всіх
-  const params = streamers.map(s => `user_login=${s}`).join("&");
-
-  const res = await safeAxios(
-    () =>
-      axios.get(`https://api.twitch.tv/helix/streams?${params}`, {
-        headers: {
-          "Client-ID": TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${accessToken}`
-        }
-      })
-  );
-
-  console.log("MAIN RESPONSE:", res.data);
-
-  const onlineStreams = res.data.data;
-  const onlineMap = {};
-
-  for (const stream of onlineStreams) {
-    onlineMap[stream.user_login] = stream;
-  }
-
-  // 2️⃣ РІВЕНЬ — fallback для пропущених стрімерів
   for (const streamer of streamers) {
-    if (!onlineMap[streamer]) {
-      const fallback = await checkSingleStreamer(streamer);
-      if (fallback) {
-        onlineMap[streamer] = fallback;
-      }
-    }
-  }
-
-  // 3️⃣ Обробка результатів
-  for (const streamer of streamers) {
-    const stream = onlineMap[streamer];
+    const stream = await checkStreamer(streamer);
 
     if (stream) {
-      // онлайн
       const title = stream.title;
-      const url = `https://twitch.tv/${streamer}`;
-      const text = `🟢 ${streamer}\n${title}\n${url}`;
+      const url = `https://twitch.tv/${stream.user_login}`;
+      const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
 
       if (!streamInfo[streamer] || !streamInfo[streamer].online) {
         const msg = await safeAxios(() =>
@@ -215,7 +229,6 @@ async function checkStreams() {
         streamInfo[streamer].title = title;
       }
     } else {
-      // офлайн
       if (streamInfo[streamer] && streamInfo[streamer].online) {
         const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
 
@@ -238,19 +251,16 @@ async function checkStreams() {
 
 
 // ===============================
-// 📌 Глобальні ловці помилок
-// ===============================
-process.on("unhandledRejection", (err) => sendErrorToTelegram(err));
-process.on("uncaughtException", (err) => sendErrorToTelegram(err));
-
-
-// ===============================
 // 📌 Express
 // ===============================
 app.get("/", (req, res) => {
   res.send("Bot is running");
 });
 
+
+// ===============================
+// 📌 Запуск
+// ===============================
 app.listen(process.env.PORT || 3000, async () => {
   await getTwitchToken();
   setInterval(getTwitchToken, 3 * 60 * 60 * 1000);

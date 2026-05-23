@@ -20,7 +20,15 @@ const streamers = [
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",
-  "KERIMCH1K"
+  "KERIMCH1K",
+  "renatkobmw",
+  "ant1ka",
+  "dedadam",
+  "vitollo_13",
+  "chpokoff",
+  "ereek",
+  "dankzlv",
+  "tadzheek"
 ];
 
 let streamInfo = {};

@@ -120,7 +120,7 @@ async function resolveRealLogin(name) {
 
 
 // ===============================
-// 📌 ТОЧНА HTML-перевірка (шукає stream.id у JSON)
+// 📌 ТОЧНА HTML-перевірка (stream.id у JSON)
 // ===============================
 async function checkHTMLStream(streamer) {
   try {
@@ -133,13 +133,10 @@ async function checkHTMLStream(streamer) {
 
     const html = res.data;
 
-    // Шукаємо JSON-блок зі stream.id
     const match = html.match(/"stream":({.*?})/);
-
     if (!match) return false;
 
     const streamData = JSON.parse(match[1]);
-
     if (streamData && streamData.id) {
       console.log(`HTML STREAM DETECTED → ${streamer}`);
       return true;
@@ -154,10 +151,75 @@ async function checkHTMLStream(streamer) {
 
 
 // ===============================
+// 📌 m3u8‑детектор через GraphQL + usher
+// ===============================
+async function checkM3U8Stream(streamer) {
+  try {
+    const gqlUrl = "https://gql.twitch.tv/gql";
+    const clientId = "kimne78kx3ncx6brgo4mv6wki5h1ko"; // публічний web client
+
+    const body = [
+      {
+        operationName: "PlaybackAccessToken_Template",
+        variables: {
+          isLive: true,
+          login: streamer,
+          isVod: false,
+          vodID: "",
+          playerType: "site"
+        },
+        extensions: {
+          persistedQuery: {
+            version: 1,
+            sha256Hash:
+              "0828119ded1c1347794d5f1c9a1e9c1f9c9e1e5c2f9f9c1f9b9c9e9f9d9c9e9"
+          }
+        }
+      }
+    ];
+
+    const tokenRes = await axios.post(gqlUrl, body, {
+      headers: {
+        "Client-ID": clientId,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = tokenRes.data?.[0]?.data?.streamPlaybackAccessToken;
+    if (!data || !data.signature || !data.value) {
+      return false;
+    }
+
+    const sig = data.signature;
+    const token = encodeURIComponent(data.value);
+
+    const m3u8Url = `https://usher.ttvnw.net/api/channel/hls/${streamer}.m3u8?client_id=${clientId}&sig=${sig}&token=${token}&allow_source=true&allow_audio_only=true`;
+
+    const m3u8Res = await axios.get(m3u8Url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      },
+      validateStatus: () => true
+    });
+
+    if (m3u8Res.status !== 200) return false;
+    if (typeof m3u8Res.data !== "string") return false;
+    if (!m3u8Res.data.includes("#EXTM3U")) return false;
+
+    console.log(`M3U8 STREAM DETECTED → ${streamer}`);
+    return true;
+  } catch (err) {
+    console.log("m3u8 check error:", err);
+    return false;
+  }
+}
+
+
+// ===============================
 // 📌 Перевірка одного стрімера
 // ===============================
 async function checkStreamer(streamer) {
-  // 1️⃣ Перевірка по API
+  // 1️⃣ API
   const res = await safeAxios(
     () =>
       axios.get(
@@ -176,7 +238,7 @@ async function checkStreamer(streamer) {
     return res.data.data[0];
   }
 
-  // 2️⃣ fallback по URL
+  // 2️⃣ URL fallback
   const realLogin = await resolveRealLogin(streamer);
 
   if (realLogin !== streamer) {
@@ -199,13 +261,21 @@ async function checkStreamer(streamer) {
     }
   }
 
-  // 3️⃣ HTML-перевірка (точна)
+  // 3️⃣ HTML
   const htmlLive = await checkHTMLStream(streamer);
-
   if (htmlLive) {
     return {
       user_login: streamer,
       title: "LIVE (HTML DETECTED)"
+    };
+  }
+
+  // 4️⃣ m3u8
+  const m3u8Live = await checkM3U8Stream(streamer);
+  if (m3u8Live) {
+    return {
+      user_login: streamer,
+      title: "LIVE (M3U8 DETECTED)"
     };
   }
 
@@ -214,79 +284,85 @@ async function checkStreamer(streamer) {
 
 
 // ===============================
-// 📌 Перевірка всіх стрімерів
+// 📌 Перевірка всіх стрімерів (чанки по 10)
 // ===============================
 async function checkStreams() {
   if (!accessToken) return;
 
-  for (const streamer of streamers) {
-    const stream = await checkStreamer(streamer);
+  const chunkSize = 10;
 
-    if (stream) {
-      const title = stream.title;
-      const url = `https://twitch.tv/${stream.user_login}`;
-      const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
+  for (let i = 0; i < streamers.length; i += chunkSize) {
+    const chunk = streamers.slice(i, i + chunkSize);
 
-      if (!streamInfo[streamer] || !streamInfo[streamer].online) {
-        const msg = await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text
-            }
-          )
-        );
+    for (const streamer of chunk) {
+      const stream = await checkStreamer(streamer);
 
-        streamInfo[streamer] = {
-          messageId: msg.data.result.message_id,
-          title,
-          online: true
-        };
+      if (stream) {
+        const title = stream.title;
+        const url = `https://twitch.tv/${stream.user_login}`;
+        const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
 
-        continue;
-      }
+        if (!streamInfo[streamer] || !streamInfo[streamer].online) {
+          const msg = await safeAxios(() =>
+            axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                text
+              }
+            )
+          );
 
-      if (streamInfo[streamer].title !== title) {
-        await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId
-            }
-          )
-        );
+          streamInfo[streamer] = {
+            messageId: msg.data.result.message_id,
+            title,
+            online: true
+          };
 
-        const msg = await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text
-            }
-          )
-        );
+          continue;
+        }
 
-        streamInfo[streamer].messageId = msg.data.result.message_id;
-        streamInfo[streamer].title = title;
-      }
-    } else {
-      if (streamInfo[streamer] && streamInfo[streamer].online) {
-        const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+        if (streamInfo[streamer].title !== title) {
+          await safeAxios(() =>
+            axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                message_id: streamInfo[streamer].messageId
+              }
+            )
+          );
 
-        await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId,
-              text: offlineText
-            }
-          )
-        );
+          const msg = await safeAxios(() =>
+            axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                text
+              }
+            )
+          );
 
-        streamInfo[streamer].online = false;
+          streamInfo[streamer].messageId = msg.data.result.message_id;
+          streamInfo[streamer].title = title;
+        }
+      } else {
+        if (streamInfo[streamer] && streamInfo[streamer].online) {
+          const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+
+          await safeAxios(() =>
+            axios.post(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+              {
+                chat_id: TELEGRAM_CHAT_ID,
+                message_id: streamInfo[streamer].messageId,
+                text: offlineText
+              }
+            )
+          );
+
+          streamInfo[streamer].online = false;
+        }
       }
     }
   }

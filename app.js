@@ -38,7 +38,9 @@ async function getTwitchToken() {
       `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
     );
     accessToken = res.data.access_token;
-  } catch (err) {}
+  } catch (err) {
+    console.log("Помилка отримання токена Twitch:", err.response?.data || err);
+  }
 }
 
 async function checkStreams() {
@@ -63,7 +65,8 @@ async function checkStreams() {
         const url = `https://twitch.tv/${streamer}`;
         const text = `🟢 ${streamer}\n${title}\n${url}`;
 
-        if (!streamInfo[streamer]) {
+        // Якщо стрімер онлайн вперше
+        if (!streamInfo[streamer] || !streamInfo[streamer].online) {
           const msg = await axios.post(
             `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
             {
@@ -77,32 +80,47 @@ async function checkStreams() {
             title: title,
             online: true
           };
-        } else {
-          if (streamInfo[streamer].title !== title) {
-            const msg = await axios.post(
-              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-              {
-                chat_id: TELEGRAM_CHAT_ID,
-                message_id: streamInfo[streamer].messageId,
-                text: text
-              }
-            );
 
-            streamInfo[streamer].title = title;
-          }
+          continue;
         }
-      } else {
-        if (streamInfo[streamer] && streamInfo[streamer].online) {
-          const old = streamInfo[streamer];
 
-          const offlineText =
-            `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+        // Якщо назва змінилась → видаляємо старе повідомлення і надсилаємо нове
+        if (streamInfo[streamer].title !== title) {
+          console.log(`Назва змінилась у ${streamer}: ${title}`);
+
+          // Видаляємо старе повідомлення
+          await axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              message_id: streamInfo[streamer].messageId
+            }
+          );
+
+          // Надсилаємо нове
+          const msg = await axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+            {
+              chat_id: TELEGRAM_CHAT_ID,
+              text: text
+            }
+          );
+
+          // Оновлюємо дані
+          streamInfo[streamer].messageId = msg.data.result.message_id;
+          streamInfo[streamer].title = title;
+        }
+
+      } else {
+        // Стрімер офлайн
+        if (streamInfo[streamer] && streamInfo[streamer].online) {
+          const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
 
           await axios.post(
             `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
             {
               chat_id: TELEGRAM_CHAT_ID,
-              message_id: old.messageId,
+              message_id: streamInfo[streamer].messageId,
               text: offlineText
             }
           );
@@ -110,7 +128,9 @@ async function checkStreams() {
           streamInfo[streamer].online = false;
         }
       }
-    } catch (err) {}
+    } catch (err) {
+      console.log(`Помилка у стрімера ${streamer}:`, err.response?.data || err);
+    }
   }
 }
 

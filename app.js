@@ -18,10 +18,11 @@ async function getTwitchToken() {
     `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
   );
   accessToken = res.data.access_token;
+  console.log("Twitch token received");
 }
 
 async function subscribeToStream(streamer) {
-  await axios.post(
+  const res = await axios.post(
     "https://api.twitch.tv/helix/eventsub/subscriptions",
     {
       type: "stream.online",
@@ -41,6 +42,9 @@ async function subscribeToStream(streamer) {
       }
     }
   );
+
+  console.log("Subscribed to stream:", streamer);
+  console.log(res.data);
 }
 
 app.post("/twitch", async (req, res) => {
@@ -65,8 +69,8 @@ app.post("/twitch", async (req, res) => {
   res.sendStatus(200);
 });
 
-app.listen(3000, async () => {
-  console.log("Bot running");
+app.listen(process.env.PORT || 3000, async () => {
+  console.log("Bot running on Render");
   await getTwitchToken();
-  await subscribeToStream("ІМЯ_СТРІМЕРА"); // ← заміни на стрімера
+  await subscribeToStream("ТУТ_ЛОГІН_СТРІМЕРА");
 });

@@ -22,7 +22,7 @@ const streamers = [
   "anarabdullaev",
   "KERIMCH1K",
   "renatkobmw",
-  "ant1ka",
+  "antlka",
   "dedadam",
   "vitollo_13",
   "chpokoff",

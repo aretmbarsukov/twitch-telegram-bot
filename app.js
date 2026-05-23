@@ -7,14 +7,47 @@ app.use(express.json({ type: "*/*" }));
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const TWITCH_SECRET = process.env.TWITCH_SECRET;
+
+let accessToken = null;
+
+// СПИСОК СТРІМЕРІВ
+const streamers = [
+  "steel",
+  "ravshann",
+  "renatko",
+  "steelaaga",
+  "ravshanbtw",
+  "anarabdullaev",
+  "KERIMCH1K",
+  "renatkobmw",
+  "ant1ka",
+  "dedadam",
+  "vitollo_13",
+  "chpokoff",
+  "ereek",
+  "dankzlv",
+  "tadzheek"
+];
+
+let streamInfo = {};
+let lastErrorText = ""; // щоб не спамити однаковими помилками
+
+
 // ===============================
-// 📌 Надсилання помилки в Telegram
+// 📌 Надсилання помилки в Telegram (без спаму)
 // ===============================
-async function sendErrorToTelegram(error) {
+async function sendErrorToTelegram(error, streamer = null) {
   const text =
     `🔥 *BOT ERROR ALERT*\n\n` +
+    (streamer ? `Стрімер: *${streamer}*\n\n` : "") +
     `❗ Помилка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
     `🕒 Час: ${new Date().toISOString()}`;
+
+  // Якщо помилка така сама — не надсилаємо повторно
+  if (text === lastErrorText) return;
+  lastErrorText = text;
 
   try {
     await axios.post(
@@ -30,35 +63,159 @@ async function sendErrorToTelegram(error) {
   }
 }
 
+
 // ===============================
 // 📌 safeAxios — будь-яка помилка → в Telegram
 // ===============================
-async function safeAxios(request) {
+async function safeAxios(request, streamer = null) {
   try {
     return await request();
   } catch (err) {
-    await sendErrorToTelegram(err);
+    await sendErrorToTelegram(err, streamer);
     throw err;
   }
 }
 
+
 // ===============================
-// 📌 ТЕСТОВА ПОМИЛКА (ГАРАНТОВАНА)
+// 📌 Отримання Twitch токена
 // ===============================
-async function testError() {
-  await safeAxios(() =>
-    axios.get("https://api.twitch.tv/helix/STREAMSSSSSSSSSS") // спеціально зламаний URL
-  );
+async function getTwitchToken() {
+  await safeAxios(async () => {
+    const res = await axios.post(
+      `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
+    );
+    accessToken = res.data.access_token;
+  });
 }
+
+
+// ===============================
+// 📌 Перевірка стрімів
+// ===============================
+async function checkStreams() {
+  if (!accessToken) return;
+
+  for (const streamer of streamers) {
+    try {
+      const res = await safeAxios(
+        () =>
+          axios.get(
+            `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
+            {
+              headers: {
+                "Client-ID": TWITCH_CLIENT_ID,
+                Authorization: `Bearer ${accessToken}`
+              }
+            }
+          ),
+        streamer
+      );
+
+      const isOnline = res.data.data.length > 0;
+
+      if (isOnline) {
+        const title = res.data.data[0].title;
+        const url = `https://twitch.tv/${streamer}`;
+        const text = `🟢 ${streamer}\n${title}\n${url}`;
+
+        // Якщо стрімер онлайн вперше
+        if (!streamInfo[streamer] || !streamInfo[streamer].online) {
+          const msg = await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  text
+                }
+              ),
+            streamer
+          );
+
+          streamInfo[streamer] = {
+            messageId: msg.data.result.message_id,
+            title,
+            online: true
+          };
+
+          continue;
+        }
+
+        // Якщо назва змінилась
+        if (streamInfo[streamer].title !== title) {
+          await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  message_id: streamInfo[streamer].messageId
+                }
+              ),
+            streamer
+          );
+
+          const msg = await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  text
+                }
+              ),
+            streamer
+          );
+
+          streamInfo[streamer].messageId = msg.data.result.message_id;
+          streamInfo[streamer].title = title;
+        }
+
+      } else {
+        // Стрімер офлайн
+        if (streamInfo[streamer] && streamInfo[streamer].online) {
+          const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+
+          await safeAxios(
+            () =>
+              axios.post(
+                `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+                {
+                  chat_id: TELEGRAM_CHAT_ID,
+                  message_id: streamInfo[streamer].messageId,
+                  text: offlineText
+                }
+              ),
+            streamer
+          );
+
+          streamInfo[streamer].online = false;
+        }
+      }
+    } catch (err) {
+      console.log(`Помилка у стрімера ${streamer}:`, err.response?.data || err);
+    }
+  }
+}
+
+
+// ===============================
+// 📌 Глобальні ловці помилок
+// ===============================
+process.on("unhandledRejection", (err) => sendErrorToTelegram(err));
+process.on("uncaughtException", (err) => sendErrorToTelegram(err));
+
 
 // ===============================
 // 📌 Express
 // ===============================
 app.get("/", (req, res) => {
-  res.send("Bot is running (test mode)");
+  res.send("Bot is running");
 });
 
 app.listen(process.env.PORT || 3000, async () => {
-  console.log("Test bot started. Помилка прилетить за 5–30 секунд.");
-  setInterval(testError, 5000); // кожні 5 секунд буде помилка
+  await getTwitchToken();
+  setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
+  setInterval(checkStreams, 30 * 1000);
 });

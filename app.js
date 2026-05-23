@@ -21,13 +21,13 @@ const streamers = [
   "anarabdullaev",
   "KERIMCH1K",
   "renatkobmw",
-  // "ant1ka",
-  // "dedadam",
-  // "vitollo_13",
-  // "chpokoff",
-  // "ereek",
-  // "dankzlv",
-  // "tadzheek"
+  "ant1ka",
+  "dedadam",
+  "vitollo_13",
+  "chpokoff",
+  "ereek",
+  "dankzlv",
+  "tadzheek"
 ];
 
 let streamInfo = {};

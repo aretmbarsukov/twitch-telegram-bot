@@ -12,7 +12,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
-// СПИСОК СТРІМЕРІВ
+// СПИСОК СТРІМЕРІВ (ОНОВЛЕНИЙ)
 const streamers = [
   "steel",
   "ravshann",
@@ -20,9 +20,9 @@ const streamers = [
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",
-  "KERIMCH1K",
+  "kerimch1k",
   "renatkobmw",
-  "antlka",
+  "antlka",       // ← ПРАВИЛЬНИЙ ЛОГІН
   "dedadam",
   "vitollo_13",
   "chpokoff",
@@ -32,7 +32,7 @@ const streamers = [
 ];
 
 let streamInfo = {};
-let lastErrorText = ""; // щоб не спамити однаковими помилками
+let lastError = ""; // щоб не спамити однаковими помилками
 
 
 // ===============================
@@ -45,9 +45,8 @@ async function sendErrorToTelegram(error, streamer = null) {
     `❗ Помилка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
     `🕒 Час: ${new Date().toISOString()}`;
 
-  // Якщо помилка така сама — не надсилаємо повторно
-  if (text === lastErrorText) return;
-  lastErrorText = text;
+  if (text === lastError) return;
+  lastError = text;
 
   try {
     await axios.post(
@@ -119,7 +118,6 @@ async function checkStreams() {
         const url = `https://twitch.tv/${streamer}`;
         const text = `🟢 ${streamer}\n${title}\n${url}`;
 
-        // Якщо стрімер онлайн вперше
         if (!streamInfo[streamer] || !streamInfo[streamer].online) {
           const msg = await safeAxios(
             () =>
@@ -142,7 +140,6 @@ async function checkStreams() {
           continue;
         }
 
-        // Якщо назва змінилась
         if (streamInfo[streamer].title !== title) {
           await safeAxios(
             () =>
@@ -173,7 +170,6 @@ async function checkStreams() {
         }
 
       } else {
-        // Стрімер офлайн
         if (streamInfo[streamer] && streamInfo[streamer].online) {
           const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
 

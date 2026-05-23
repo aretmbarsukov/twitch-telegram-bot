@@ -120,7 +120,7 @@ async function resolveRealLogin(name) {
 
 
 // ===============================
-// 📌 HTML-перевірка (останній fallback)
+// 📌 ТОЧНА HTML-перевірка (шукає stream.id у JSON)
 // ===============================
 async function checkHTMLStream(streamer) {
   try {
@@ -133,10 +133,14 @@ async function checkHTMLStream(streamer) {
 
     const html = res.data;
 
-    if (
-      html.includes('property="og:video"') ||
-      html.includes('"isLiveBroadcast":true')
-    ) {
+    // Шукаємо JSON-блок зі stream.id
+    const match = html.match(/"stream":({.*?})/);
+
+    if (!match) return false;
+
+    const streamData = JSON.parse(match[1]);
+
+    if (streamData && streamData.id) {
       console.log(`HTML STREAM DETECTED → ${streamer}`);
       return true;
     }
@@ -195,7 +199,7 @@ async function checkStreamer(streamer) {
     }
   }
 
-  // 3️⃣ HTML-перевірка
+  // 3️⃣ HTML-перевірка (точна)
   const htmlLive = await checkHTMLStream(streamer);
 
   if (htmlLive) {

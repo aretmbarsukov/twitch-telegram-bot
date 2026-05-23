@@ -16,7 +16,7 @@ let accessToken = null;
 const streamers = [
   "steel",
   "ravshann",
-  "renatko",
+  //"renatko",
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",

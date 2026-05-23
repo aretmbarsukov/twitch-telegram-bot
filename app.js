@@ -13,40 +13,20 @@ const CALLBACK_URL = process.env.CALLBACK_URL;
 
 let accessToken = null;
 
+// Отримуємо Twitch токен
 async function getTwitchToken() {
-  const res = await axios.post(
-    `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
-  );
-  accessToken = res.data.access_token;
-  console.log("Twitch token received");
+  try {
+    const res = await axios.post(
+      `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
+    );
+    accessToken = res.data.access_token;
+    console.log("Twitch token received");
+  } catch (err) {
+    console.error("Error getting Twitch token:", err.message);
+  }
 }
 
-async function subscribeToStream(streamer) {
-  const res = await axios.post(
-    "https://api.twitch.tv/helix/eventsub/subscriptions",
-    {
-      type: "stream.online",
-      version: "1",
-      condition: { broadcaster_user_login: streamer },
-      transport: {
-        method: "webhook",
-        callback: `${CALLBACK_URL}/twitch`,
-        secret: "mysecret123"
-      }
-    },
-    {
-      headers: {
-        "Client-ID": TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
-
-  console.log("Subscribed to stream:", streamer);
-  console.log(res.data);
-}
-
+// Twitch webhook endpoint
 app.post("/twitch", async (req, res) => {
   const messageType = req.headers["twitch-eventsub-message-type"];
 
@@ -69,17 +49,13 @@ app.post("/twitch", async (req, res) => {
   res.sendStatus(200);
 });
 
+// Головна сторінка
+app.get("/", (req, res) => {
+  res.send("Bot is running");
+});
+
+// Запуск сервера
 app.listen(process.env.PORT || 3000, async () => {
   console.log("Bot running on Render");
   await getTwitchToken();
-
-  await subscribeToStream("steel");
-  await subscribeToStream("ravshann");
-  await subscribeToStream("renatko");
-  await subscribeToStream("bratishkinoff");
-  await subscribeToStream("steelaaga");
-  await subscribeToStream("ravshanbtw");
-  await subscribeToStream("anarabdullaev");
-
-  console.log("All subscriptions created");
 });

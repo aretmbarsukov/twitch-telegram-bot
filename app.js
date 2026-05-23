@@ -73,7 +73,7 @@ async function safeAxios(request, streamer = null) {
 
 
 // ===============================
-// 📌 Перевірка через HTML таймер + назву стріму
+// 📌 Перевірка через HTML (таймер + назва)
 // ===============================
 async function checkStreamByFrontend(streamer) {
   try {
@@ -86,27 +86,41 @@ async function checkStreamByFrontend(streamer) {
 
     const html = res.data;
 
-    // 1️⃣ Перевірка таймера стріму
-    const liveTimeMatch = html.match(/<span class="live-time">([\s\S]*?)<\/span>/);
+    console.log(`=== FRONTEND CHECK FOR ${streamer} ===`);
 
-    if (!liveTimeMatch) {
-      return null; // стрім не йде
+    // 1️⃣ шукаємо таймер стріму
+    const timeMatch =
+      html.match(/data-a-target="stream-time"[^>]*>(.*?)<\/span>/) ||
+      html.match(/class="live-time"[^>]*>(.*?)<\/span>/);
+
+    if (!timeMatch) {
+      console.log(`NO TIMER FOUND for ${streamer}`);
+      return null;
     }
 
-    // 2️⃣ Назва стріму
+    const timeText = timeMatch[1].replace(/<[^>]+>/g, "").trim();
+    console.log(`TIMER for ${streamer}:`, timeText);
+
+    // 2️⃣ шукаємо назву стріму
     const titleMatch = html.match(/data-a-target="stream-title"[^>]*>(.*?)<\/p>/);
 
     const title = titleMatch
       ? titleMatch[1].replace(/<[^>]+>/g, "").trim()
       : "LIVE STREAM";
 
-    return {
-      user_login: streamer,
-      title
-    };
+    console.log(`TITLE for ${streamer}:`, title);
+
+    if (timeText && timeText !== "") {
+      return {
+        user_login: streamer,
+        title
+      };
+    }
+
+    return null;
 
   } catch (err) {
-    console.log("Frontend check error:", err);
+    console.log("Frontend check error:", streamer, err.message);
     return null;
   }
 }
@@ -117,28 +131,9 @@ async function checkStreamByFrontend(streamer) {
 // ===============================
 async function checkStreamer(streamer) {
 
-  // ❌ API ПЕРЕВІРКА ВИМКНЕНА
-  /*
-  const res = await safeAxios(
-    () =>
-      axios.get(
-        `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
-        {
-          headers: {
-            "Client-ID": TWITCH_CLIENT_ID,
-            Authorization: `Bearer ${accessToken}`
-          }
-        }
-      ),
-    streamer
-  );
+  // ❌ API ПОВНІСТЮ ВИМКНЕНИЙ
 
-  if (res.data.data.length > 0) {
-    return res.data.data[0];
-  }
-  */
-
-  // ✔ Перевірка через фронтенд (таймер + назва)
+  // ✔ Перевірка через фронтенд
   const frontendLive = await checkStreamByFrontend(streamer);
   if (frontendLive) {
     return frontendLive;

@@ -20,9 +20,7 @@ const streamers = [
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",
-  "karas_bobra",
-  "art228009",
-  "art009228"
+  "KERIMCH1K"
 ];
 
 let streamInfo = {};

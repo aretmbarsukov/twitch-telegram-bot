@@ -16,13 +16,13 @@ let accessToken = null;
 const streamers = [
   "steel",
   "ravshann",
-  //"renatko",
+  "renatko",
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",
   "kerimch1k",
   "renatkobmw",
-  "ant1ka",   // ← ТВОЙ ВАРИАНТ, ЯК ТИ ХОЧЕШ
+  "ant1ka",   // ← ТВОЙ ВАРІАНТ
   "dedadam",
   "vitollo_13",
   "chpokoff",
@@ -98,6 +98,8 @@ async function getTwitchToken() {
 // 📌 Fallback — перевірка одного стрімера
 // ===============================
 async function checkSingleStreamer(streamer) {
+  console.log("FALLBACK CHECK:", streamer);
+
   const res = await safeAxios(
     () =>
       axios.get(
@@ -112,6 +114,8 @@ async function checkSingleStreamer(streamer) {
     streamer
   );
 
+  console.log("FALLBACK RESPONSE:", streamer, res.data);
+
   return res.data.data.length > 0 ? res.data.data[0] : null;
 }
 
@@ -121,6 +125,8 @@ async function checkSingleStreamer(streamer) {
 // ===============================
 async function checkStreams() {
   if (!accessToken) return;
+
+  console.log("=== CHECKING STREAMS ===");
 
   // 1️⃣ РІВЕНЬ — один запит на всіх
   const params = streamers.map(s => `user_login=${s}`).join("&");
@@ -134,6 +140,8 @@ async function checkStreams() {
         }
       })
   );
+
+  console.log("MAIN RESPONSE:", res.data);
 
   const onlineStreams = res.data.data;
   const onlineMap = {};

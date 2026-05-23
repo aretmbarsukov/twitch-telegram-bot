@@ -22,7 +22,7 @@ const streamers = [
   "anarabdullaev",
   "kerimch1k",
   "renatkobmw",
-  "ant1ka",   // ← ТВОЯ ВЕРСІЯ, ЯК ТИ ХОЧЕШ
+  "ant1ka",   // ← ТВОЙ ВАРИАНТ, ЯК ТИ ХОЧЕШ
   "dedadam",
   "vitollo_13",
   "chpokoff",
@@ -32,7 +32,7 @@ const streamers = [
 ];
 
 let streamInfo = {};
-let lastError = ""; // щоб не спамити однаковими помилками
+let lastError = ""; // антиспам помилок
 
 
 // ===============================
@@ -95,11 +95,34 @@ async function getTwitchToken() {
 
 
 // ===============================
-// 📌 Перевірка стрімів (ОДИН ЗАПИТ НА ВСІХ)
+// 📌 Fallback — перевірка одного стрімера
+// ===============================
+async function checkSingleStreamer(streamer) {
+  const res = await safeAxios(
+    () =>
+      axios.get(
+        `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
+        {
+          headers: {
+            "Client-ID": TWITCH_CLIENT_ID,
+            Authorization: `Bearer ${accessToken}`
+          }
+        }
+      ),
+    streamer
+  );
+
+  return res.data.data.length > 0 ? res.data.data[0] : null;
+}
+
+
+// ===============================
+// 📌 Перевірка стрімів (2 рівні)
 // ===============================
 async function checkStreams() {
   if (!accessToken) return;
 
+  // 1️⃣ РІВЕНЬ — один запит на всіх
   const params = streamers.map(s => `user_login=${s}`).join("&");
 
   const res = await safeAxios(
@@ -113,14 +136,23 @@ async function checkStreams() {
   );
 
   const onlineStreams = res.data.data;
-
-  // позначаємо всіх онлайн
   const onlineMap = {};
+
   for (const stream of onlineStreams) {
     onlineMap[stream.user_login] = stream;
   }
 
-  // обробка кожного стрімера
+  // 2️⃣ РІВЕНЬ — fallback для пропущених стрімерів
+  for (const streamer of streamers) {
+    if (!onlineMap[streamer]) {
+      const fallback = await checkSingleStreamer(streamer);
+      if (fallback) {
+        onlineMap[streamer] = fallback;
+      }
+    }
+  }
+
+  // 3️⃣ Обробка результатів
   for (const streamer of streamers) {
     const stream = onlineMap[streamer];
 

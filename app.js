@@ -22,7 +22,7 @@ const streamers = [
   "anarabdullaev",
   "kerimch1k",
   "renatkobmw",
-  "ant1ka",   // ← тут залишаєш як є
+  "ant1ka",   // ← залишаєш як є
   "dedadam",
   "vitollo_13",
   "chpokoff",
@@ -92,7 +92,7 @@ async function getTwitchToken() {
 
 
 // ===============================
-// 📌 ВИЗНАЧЕННЯ СПРАВЖНЬОГО LOGIN ЧЕРЕЗ URL
+// 📌 Fallback: визначення справжнього логіну через URL
 // ===============================
 async function resolveRealLogin(name) {
   try {
@@ -124,7 +124,7 @@ async function resolveRealLogin(name) {
 // 📌 Перевірка одного стрімера
 // ===============================
 async function checkStreamer(streamer) {
-  // 1️⃣ Перевірка по логіну
+  // 1️⃣ Перевірка по логіну (як раніше)
   const res = await safeAxios(
     () =>
       axios.get(

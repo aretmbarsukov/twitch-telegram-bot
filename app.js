@@ -16,7 +16,6 @@ const streamers = [
   "steel",
   "ravshann",
   "renatko",
-  "bratishkinoff",
   "steelaaga",
   "ravshanbtw",
   "anarabdullaev",

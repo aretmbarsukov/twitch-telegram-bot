@@ -1,5 +1,6 @@
 import express from "express";
 import axios from "axios";
+import puppeteer from "puppeteer";
 
 const app = express();
 app.use(express.json({ type: "*/*" }));
@@ -8,7 +9,6 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 let streamInfo = {};
-let lastError = "";
 
 const streamers = [
   "ant1ka",
@@ -28,120 +28,67 @@ const streamers = [
   "tadzheek"
 ];
 
-
 // ===============================
-// 📌 Надсилання помилки в Telegram
+// 📌 Puppeteer: отримуємо DOM Twitch
 // ===============================
-async function sendErrorToTelegram(error, streamer = null) {
-  const text =
-    `🔥 *BOT ERROR ALERT*\n\n` +
-    (streamer ? `Стрімер: *${streamer}*\n\n` : "") +
-    `❗ Помилка:\n\`\`\`\n${error.stack || error}\n\`\`\`\n` +
-    `🕒 Час: ${new Date().toISOString()}`;
-
-  if (text === lastError) return;
-  lastError = text;
-
+async function checkStreamPuppeteer(streamer) {
   try {
-    await axios.post(
-      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-      {
-        chat_id: TELEGRAM_CHAT_ID,
-        text,
-        parse_mode: "Markdown"
-      }
-    );
-  } catch (err) {
-    console.log("Помилка надсилання помилки в Telegram:", err);
-  }
-}
-
-
-// ===============================
-// 📌 safeAxios — ловить помилки
-// ===============================
-async function safeAxios(request, streamer = null) {
-  try {
-    const result = await request();
-    lastError = "";
-    return result;
-  } catch (err) {
-    await sendErrorToTelegram(err, streamer);
-    throw err;
-  }
-}
-
-
-// ===============================
-// 📌 Перевірка через HTML (таймер + назва)
-// ===============================
-async function checkStreamByFrontend(streamer) {
-  try {
-    const url = `https://www.twitch.tv/${streamer}`;
-    const res = await axios.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
-    const html = res.data;
+    const page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    );
 
-    console.log(`=== FRONTEND CHECK FOR ${streamer} ===`);
+    await page.goto(`https://www.twitch.tv/${streamer}`, {
+      waitUntil: "networkidle2",
+      timeout: 60000
+    });
 
-    // 1️⃣ шукаємо таймер стріму
-    const timeMatch =
-      html.match(/data-a-target="stream-time"[^>]*>(.*?)<\/span>/) ||
-      html.match(/class="live-time"[^>]*>(.*?)<\/span>/);
+    // чекаємо поки React намалює DOM
+    await page.waitForTimeout(3000);
 
-    if (!timeMatch) {
-      console.log(`NO TIMER FOUND for ${streamer}`);
-      return null;
-    }
+    // шукаємо таймер
+    const time = await page.evaluate(() => {
+      const el =
+        document.querySelector('[data-a-target="stream-time"]') ||
+        document.querySelector(".live-time");
 
-    const timeText = timeMatch[1].replace(/<[^>]+>/g, "").trim();
-    console.log(`TIMER for ${streamer}:`, timeText);
+      return el ? el.innerText.trim() : null;
+    });
 
-    // 2️⃣ шукаємо назву стріму
-    const titleMatch = html.match(/data-a-target="stream-title"[^>]*>(.*?)<\/p>/);
+    // шукаємо назву стріму
+    const title = await page.evaluate(() => {
+      const el = document.querySelector('[data-a-target="stream-title"]');
+      return el ? el.innerText.trim() : null;
+    });
 
-    const title = titleMatch
-      ? titleMatch[1].replace(/<[^>]+>/g, "").trim()
-      : "LIVE STREAM";
+    await browser.close();
 
-    console.log(`TITLE for ${streamer}:`, title);
-
-    if (timeText && timeText !== "") {
+    if (time) {
       return {
         user_login: streamer,
-        title
+        title: title || "LIVE STREAM"
       };
     }
 
     return null;
 
   } catch (err) {
-    console.log("Frontend check error:", streamer, err.message);
+    console.log("Puppeteer error:", err.message);
     return null;
   }
 }
 
-
 // ===============================
-// 📌 Перевірка одного стрімера (API вимкнено)
+// 📌 Перевірка одного стрімера
 // ===============================
 async function checkStreamer(streamer) {
-
-  // ❌ API ПОВНІСТЮ ВИМКНЕНИЙ
-
-  // ✔ Перевірка через фронтенд
-  const frontendLive = await checkStreamByFrontend(streamer);
-  if (frontendLive) {
-    return frontendLive;
-  }
-
-  return null;
+  return await checkStreamPuppeteer(streamer);
 }
-
 
 // ===============================
 // 📌 Перевірка всіх стрімерів
@@ -151,67 +98,58 @@ async function checkStreams() {
     const stream = await checkStreamer(streamer);
 
     if (stream) {
-      const title = stream.title;
-      const url = `https://twitch.tv/${stream.user_login}`;
-      const text = `🟢 ${stream.user_login}\n${title}\n${url}`;
+      const text = `🟢 ${stream.user_login}\n${stream.title}\nhttps://twitch.tv/${stream.user_login}`;
 
       if (!streamInfo[streamer] || !streamInfo[streamer].online) {
-        const msg = await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text
-            }
-          )
+        const msg = await axios.post(
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+          {
+            chat_id: TELEGRAM_CHAT_ID,
+            text
+          }
         );
 
         streamInfo[streamer] = {
           messageId: msg.data.result.message_id,
-          title,
+          title: stream.title,
           online: true
         };
 
         continue;
       }
 
-      if (streamInfo[streamer].title !== title) {
-        await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId
-            }
-          )
+      if (streamInfo[streamer].title !== stream.title) {
+        await axios.post(
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+          {
+            chat_id: TELEGRAM_CHAT_ID,
+            message_id: streamInfo[streamer].messageId
+          }
         );
 
-        const msg = await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              text
-            }
-          )
+        const msg = await axios.post(
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+          {
+            chat_id: TELEGRAM_CHAT_ID,
+            text
+          }
         );
 
         streamInfo[streamer].messageId = msg.data.result.message_id;
-        streamInfo[streamer].title = title;
+        streamInfo[streamer].title = stream.title;
       }
+
     } else {
       if (streamInfo[streamer] && streamInfo[streamer].online) {
-        const offlineText = `🔴 ${streamer}\nСТРИМ ЗАКОНЧИЛСЯ\n🔴`;
+        const offlineText = `🔴 ${streamer}\nСТРІМ ЗАКІНЧИВСЯ\n🔴`;
 
-        await safeAxios(() =>
-          axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-            {
-              chat_id: TELEGRAM_CHAT_ID,
-              message_id: streamInfo[streamer].messageId,
-              text: offlineText
-            }
-          )
+        await axios.post(
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+          {
+            chat_id: TELEGRAM_CHAT_ID,
+            message_id: streamInfo[streamer].messageId,
+            text: offlineText
+          }
         );
 
         streamInfo[streamer].online = false;
@@ -220,7 +158,6 @@ async function checkStreams() {
   }
 }
 
-
 // ===============================
 // 📌 Express
 // ===============================
@@ -228,10 +165,9 @@ app.get("/", (req, res) => {
   res.send("Bot is running");
 });
 
-
 // ===============================
 // 📌 Запуск
 // ===============================
 app.listen(process.env.PORT || 3000, async () => {
-  setInterval(checkStreams, 30 * 1000);
+  setInterval(checkStreams, 30000);
 });

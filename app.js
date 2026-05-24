@@ -1,11 +1,9 @@
 import express from "express";
 import axios from "axios";
-import fs from "fs";
 
 const app = express();
 app.use(express.json({ type: "*/*" }));
 
-// Ловим ВСЕ ошибки, чтобы Render не падал
 process.on("uncaughtException", err => console.log("UNCAUGHT:", err));
 process.on("unhandledRejection", err => console.log("UNHANDLED:", err));
 
@@ -17,7 +15,6 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
-// ТВОЙ СПИСОК СТРИМЕРОВ
 const streamers = [
   "steel",
   "ravshann",
@@ -35,38 +32,8 @@ const streamers = [
   "dankzlv"
 ];
 
-// Данные о стримах
-let streamInfo = {};
+let lastMessages = {}; // message_id для каждого стримера
 
-// ===============================
-// 📌 Загрузка данных из файла
-// ===============================
-function loadStreamInfo() {
-  if (fs.existsSync("streamInfo.json")) {
-    try {
-      const data = fs.readFileSync("streamInfo.json", "utf8");
-      streamInfo = JSON.parse(data);
-      console.log("streamInfo восстановлен из файла");
-    } catch (err) {
-      console.log("Ошибка чтения streamInfo.json:", err);
-    }
-  }
-}
-
-// ===============================
-// 📌 Сохранение данных в файл
-// ===============================
-function saveStreamInfo() {
-  try {
-    fs.writeFileSync("streamInfo.json", JSON.stringify(streamInfo, null, 2));
-  } catch (err) {
-    console.log("Ошибка записи streamInfo.json:", err);
-  }
-}
-
-// ===============================
-// 📌 Получение Twitch токена
-// ===============================
 async function getTwitchToken() {
   try {
     const res = await axios.post(
@@ -79,9 +46,6 @@ async function getTwitchToken() {
   }
 }
 
-// ===============================
-// 📌 Проверка одного стримера
-// ===============================
 async function checkStreamer(streamer) {
   try {
     const res = await axios.get(
@@ -93,7 +57,6 @@ async function checkStreamer(streamer) {
         }
       }
     );
-
     return res.data.data.length > 0 ? res.data.data[0] : null;
   } catch (err) {
     console.log("API error:", err);
@@ -101,16 +64,13 @@ async function checkStreamer(streamer) {
   }
 }
 
-// ===============================
-// 📌 Проверка всех стримеров
-// ===============================
 async function checkStreams() {
   if (!accessToken) return;
 
   for (const streamer of streamers) {
     const stream = await checkStreamer(streamer);
 
-    // 🟢 СТРИМ ОНЛАЙН
+    // 🟢 ОНЛАЙН
     if (stream) {
       const title = stream.title || "Без названия";
       const category = stream.game_name || "Без категории";
@@ -121,108 +81,52 @@ async function checkStreams() {
         `📝 Название: ${title}\n` +
         `🔗 https://twitch.tv/${stream.user_login}`;
 
-      // Новый стрим
-      if (!streamInfo[streamer] || !streamInfo[streamer].online) {
-        const msg = await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-          {
-            chat_id: TELEGRAM_CHAT_ID,
-            text,
-            parse_mode: "Markdown"
-          }
-        );
-
-        streamInfo[streamer] = {
-          messageId: msg.data.result.message_id,
-          title,
-          category,
-          startedAt: new Date(stream.started_at),
-          online: true
-        };
-
-        saveStreamInfo();
-        console.log("ONLINE:", streamer);
-        continue;
-      }
-
-      // Обновление названия/категории
-      if (
-        streamInfo[streamer].title !== title ||
-        streamInfo[streamer].category !== category
-      ) {
+      // удаляем старое сообщение
+      if (lastMessages[streamer]) {
         await axios.post(
           `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
           {
             chat_id: TELEGRAM_CHAT_ID,
-            message_id: streamInfo[streamer].messageId
+            message_id: lastMessages[streamer]
           }
         );
-
-        const msg = await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-          {
-            chat_id: TELEGRAM_CHAT_ID,
-            text,
-            parse_mode: "Markdown"
-          }
-        );
-
-        streamInfo[streamer].messageId = msg.data.result.message_id;
-        streamInfo[streamer].title = title;
-        streamInfo[streamer].category = category;
-
-        saveStreamInfo();
-        console.log("UPDATED:", streamer);
       }
+
+      // отправляем новое
+      const msg = await axios.post(
+        `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+        {
+          chat_id: TELEGRAM_CHAT_ID,
+          text,
+          parse_mode: "Markdown"
+        }
+      );
+
+      lastMessages[streamer] = msg.data.result.message_id;
+      console.log("ONLINE:", streamer);
     }
 
-    // 🔴 СТРИМ ОФФЛАЙН
+    // 🔴 ОФФЛАЙН
     else {
-      if (streamInfo[streamer] && streamInfo[streamer].online) {
-        const start = streamInfo[streamer].startedAt;
-        const end = new Date();
-
-        const diff = Math.floor((end - start) / 1000);
-        const hours = Math.floor(diff / 3600);
-        const minutes = Math.floor((diff % 3600) / 60);
-
-        const offlineText =
-          `🔴 *${streamer}*\n` +
-          `Стрим завершён\n` +
-          `🟢 Начался: ${start.toLocaleString()}\n` +
-          `🔴 Завершился: ${end.toLocaleString()}\n` +
-          `⏱️ Длился: ${hours} ч ${minutes} мин`;
-
+      if (lastMessages[streamer]) {
         await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
           {
             chat_id: TELEGRAM_CHAT_ID,
-            message_id: streamInfo[streamer].messageId,
-            text: offlineText,
-            parse_mode: "Markdown"
+            message_id: lastMessages[streamer]
           }
         );
 
-        streamInfo[streamer].online = false;
-
-        saveStreamInfo();
+        lastMessages[streamer] = null;
         console.log("OFFLINE:", streamer);
       }
     }
   }
 }
 
-// ===============================
-// 📌 Express
-// ===============================
 app.get("/", (req, res) => {
   res.send("Bot is running");
 });
-
-// ===============================
-// 📌 Запуск
-// ===============================
-loadStreamInfo();
 
 app.listen(process.env.PORT || 3000, async () => {
   await getTwitchToken();

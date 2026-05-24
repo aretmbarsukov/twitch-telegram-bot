@@ -66,6 +66,8 @@ async function checkStreamer(streamer) {
 
 async function checkStreams() {
   if (!accessToken) return;
+  console.log("🔍 Перевірка стримерів:", new Date().toLocaleTimeString("uk-UA"));
+
   for (const streamer of streamers) {
     const stream = await checkStreamer(streamer);
 
@@ -114,6 +116,7 @@ app.get("/", (req, res) => {
 app.listen(process.env.PORT || 3000, async () => {
   await getTwitchToken();
   setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
-  setInterval(checkStreams, 30 * 1000);
+  setInterval(checkStreams, 10 * 60 * 1000); // кожні 10 хвилин
+  checkStreams(); // перша перевірка одразу при старті
   console.log("Bot started");
 });

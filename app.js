@@ -9,7 +9,6 @@ process.on("unhandledRejection", err => console.log("UNHANDLED:", err));
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
@@ -32,7 +31,8 @@ const streamers = [
   "dankzlv"
 ];
 
-let lastMessages = {}; // message_id для каждого стримера
+let lastMessages = {};
+let onlineStatus = {};
 
 async function getTwitchToken() {
   try {
@@ -66,58 +66,41 @@ async function checkStreamer(streamer) {
 
 async function checkStreams() {
   if (!accessToken) return;
-
   for (const streamer of streamers) {
     const stream = await checkStreamer(streamer);
 
     // 🟢 ОНЛАЙН
     if (stream) {
-      const title = stream.title || "Без названия";
-      const category = stream.game_name || "Без категории";
+      if (!onlineStatus[streamer]) {
+        const title = stream.title || "Без названия";
+        const category = stream.game_name || "Без категории";
+        const text =
+          `🟢 *${stream.user_login}*\n` +
+          `🎮 Категория: *${category}*\n` +
+          `📝 Название: ${title}\n` +
+          `🔗 https://twitch.tv/${stream.user_login}`;
 
-      const text =
-        `🟢 *${stream.user_login}*\n` +
-        `🎮 Категория: *${category}*\n` +
-        `📝 Название: ${title}\n` +
-        `🔗 https://twitch.tv/${stream.user_login}`;
-
-      // удаляем старое сообщение
-      if (lastMessages[streamer]) {
-        await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-          {
-            chat_id: TELEGRAM_CHAT_ID,
-            message_id: lastMessages[streamer]
-          }
+        const msg = await axios.post(
+          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+          { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "Markdown" }
         );
+        lastMessages[streamer] = msg.data.result.message_id;
+        onlineStatus[streamer] = true;
+        console.log("ONLINE:", streamer);
       }
-
-      // отправляем новое
-      const msg = await axios.post(
-        `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-        {
-          chat_id: TELEGRAM_CHAT_ID,
-          text,
-          parse_mode: "Markdown"
-        }
-      );
-
-      lastMessages[streamer] = msg.data.result.message_id;
-      console.log("ONLINE:", streamer);
     }
 
     // 🔴 ОФФЛАЙН
     else {
-      if (lastMessages[streamer]) {
-        await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-          {
-            chat_id: TELEGRAM_CHAT_ID,
-            message_id: lastMessages[streamer]
-          }
-        );
-
-        lastMessages[streamer] = null;
+      if (onlineStatus[streamer]) {
+        if (lastMessages[streamer]) {
+          await axios.post(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+            { chat_id: TELEGRAM_CHAT_ID, message_id: lastMessages[streamer] }
+          );
+          lastMessages[streamer] = null;
+        }
+        onlineStatus[streamer] = false;
         console.log("OFFLINE:", streamer);
       }
     }

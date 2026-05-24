@@ -21,7 +21,12 @@ const streamers = [
   "anarabdullaev",
   "kerimch1k",
   "renatkobmw",
-  "blslan"
+  "blslan",
+  "tadzheek",
+  "dedadam",
+  "vitollo_13",
+  "ereek",
+  "dankzlv"
 ];
 
 let streamInfo = {};

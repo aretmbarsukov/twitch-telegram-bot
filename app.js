@@ -15,24 +15,20 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 let accessToken = null;
 
 const streamers = [
-  "steel",
-  "ravshann",
-  "renatko",
-  "steelaaga",
-  "ravshanbtw",
-  "anarabdullaev",
-  "kerimch1k",
-  "renatkobmw",
-  "blslan",
-  "tadzheek",
-  "dedadam",
-  "vitollo_13",
-  "ereek",
-  "dankzlv"
+  "steel","ravshann","renatko","steelaaga","ravshanbtw",
+  "anarabdullaev","kerimch1k","renatkobmw","blslan",
+  "tadzheek","dedadam","vitollo_13","ereek","dankzlv"
 ];
 
 let lastMessages = {};
 let onlineStatus = {};
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 async function getTwitchToken() {
   try {
@@ -71,29 +67,25 @@ async function checkStreams() {
   for (const streamer of streamers) {
     const stream = await checkStreamer(streamer);
 
-    // 🟢 ОНЛАЙН
     if (stream) {
       if (!onlineStatus[streamer]) {
-        const title = stream.title || "Без названия";
-        const category = stream.game_name || "Без категории";
+        const title = escapeHtml(stream.title || "Без названия");
+        const category = escapeHtml(stream.game_name || "Без категории");
         const text =
-          `🟢 *${stream.user_login}*\n` +
-          `🎮 Категория: *${category}*\n` +
+          `🟢 <b>${stream.user_login}</b>\n` +
+          `🎮 Категория: <b>${category}</b>\n` +
           `📝 Название: ${title}\n` +
           `🔗 https://twitch.tv/${stream.user_login}`;
 
         const msg = await axios.post(
           `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-          { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "Markdown" }
+          { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }
         );
         lastMessages[streamer] = msg.data.result.message_id;
         onlineStatus[streamer] = true;
         console.log("ONLINE:", streamer);
       }
-    }
-
-    // 🔴 ОФФЛАЙН
-    else {
+    } else {
       if (onlineStatus[streamer]) {
         if (lastMessages[streamer]) {
           await axios.post(
@@ -109,7 +101,6 @@ async function checkStreams() {
   }
 }
 
-
 app.get("/", (req, res) => {
   res.send("Bot is running");
 });
@@ -117,7 +108,7 @@ app.get("/", (req, res) => {
 app.listen(process.env.PORT || 3000, async () => {
   await getTwitchToken();
   setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
-  setInterval(checkStreams, 10 * 60 * 1000); // кожні 10 хвилин
-  checkStreams(); // перша перевірка одразу при старті
+  setInterval(checkStreams, 10 * 60 * 1000);
+  checkStreams();
   console.log("Bot started");
 });

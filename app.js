@@ -1,5 +1,6 @@
 import express from "express";
 import axios from "axios";
+import fs from "fs";
 
 const app = express();
 app.use(express.json({ type: "*/*" }));
@@ -16,6 +17,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 
 let accessToken = null;
 
+// ТВОЙ СПИСОК СТРИМЕРОВ
 const streamers = [
   "steel",
   "ravshann",
@@ -24,10 +26,43 @@ const streamers = [
   "ravshanbtw",
   "anarabdullaev",
   "kerimch1k",
-  "renatkobmw"
+  "renatkobmw",
+  "blslan",
+  "tadzheek",
+  "dedadam",
+  "vitollo_13",
+  "ereek",
+  "dankzlv"
 ];
 
+// Данные о стримах
 let streamInfo = {};
+
+// ===============================
+// 📌 Загрузка данных из файла
+// ===============================
+function loadStreamInfo() {
+  if (fs.existsSync("streamInfo.json")) {
+    try {
+      const data = fs.readFileSync("streamInfo.json", "utf8");
+      streamInfo = JSON.parse(data);
+      console.log("streamInfo восстановлен из файла");
+    } catch (err) {
+      console.log("Ошибка чтения streamInfo.json:", err);
+    }
+  }
+}
+
+// ===============================
+// 📌 Сохранение данных в файл
+// ===============================
+function saveStreamInfo() {
+  try {
+    fs.writeFileSync("streamInfo.json", JSON.stringify(streamInfo, null, 2));
+  } catch (err) {
+    console.log("Ошибка записи streamInfo.json:", err);
+  }
+}
 
 // ===============================
 // 📌 Получение Twitch токена
@@ -105,6 +140,7 @@ async function checkStreams() {
           online: true
         };
 
+        saveStreamInfo();
         console.log("ONLINE:", streamer);
         continue;
       }
@@ -135,6 +171,7 @@ async function checkStreams() {
         streamInfo[streamer].title = title;
         streamInfo[streamer].category = category;
 
+        saveStreamInfo();
         console.log("UPDATED:", streamer);
       }
     }
@@ -168,6 +205,7 @@ async function checkStreams() {
 
         streamInfo[streamer].online = false;
 
+        saveStreamInfo();
         console.log("OFFLINE:", streamer);
       }
     }
@@ -184,6 +222,8 @@ app.get("/", (req, res) => {
 // ===============================
 // 📌 Запуск
 // ===============================
+loadStreamInfo();
+
 app.listen(process.env.PORT || 3000, async () => {
   await getTwitchToken();
   setInterval(getTwitchToken, 3 * 60 * 60 * 1000);

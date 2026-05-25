@@ -53,14 +53,21 @@ if (fs.existsSync("state.json")) {
   }
 }
 
+// ---------------- Створення всіх папок при запуску ----------------
+
+function ensureDir(path) {
+  fs.mkdirSync(path, { recursive: true });
+}
+
+for (const streamer of streamers) {
+  ensureDir(`data/notifications/${streamer}`);
+  ensureDir(`data/streams/${streamer}`);
+}
+
 // ---------------- Допоміжні функції ----------------
 
 function escapeHtml(text) {
   return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-function ensureDir(path) {
-  fs.mkdirSync(path, { recursive: true });
 }
 
 function formatDate(date) {
@@ -102,29 +109,37 @@ async function checkStreamer(streamer, token) {
 }
 
 async function getTopClips(userId, startIso, endIso, token) {
-  if (!userId) return [];
+  try {
+    const params = new URLSearchParams({
+      broadcaster_id: userId,
+      started_at: startIso,
+      ended_at: endIso,
+      first: "100"
+    });
 
-  const params = new URLSearchParams({
-    broadcaster_id: userId,
-    started_at: startIso,
-    ended_at: endIso,
-    first: "100"
-  });
+    const res = await axios.get(
+      `https://api.twitch.tv/helix/clips?${params.toString()}`,
+      { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
+    );
 
-  const res = await axios.get(
-    `https://api.twitch.tv/helix/clips?${params.toString()}`,
-    { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
-  );
+    const clips = res.data.data || [];
+    if (!clips.length) return [];
 
-  const clips = res.data.data || [];
-  if (!clips.length) return [];
+    clips.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+    return clips.slice(0, 3).map(c => ({
+      title: c.title,
+      url: c.url,
+      views: c.view_count
+    }));
 
-  clips.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
-  return clips.slice(0, 3).map(c => ({
-    title: c.title,
-    url: c.url,
-    views: c.view_count
-  }));
+  } catch (err) {
+    if (err.response && err.response.status === 400) {
+      console.log("Кліпи недоступні (не партнер або немає кліпів)");
+      return [];
+    }
+    console.log("Помилка кліпів:", err.message);
+    return [];
+  }
 }
 
 async function sendMessage(text) {
@@ -174,7 +189,10 @@ async function main() {
         if (!state.onlineStatus[streamer]) {
           const msgId = await sendMessage(text);
           state.onlineStatus[streamer] = msgId;
-          state.streamStartTime[streamer] = new Date().toISOString();
+
+          // ВАЖЛИВО: правильний час початку
+          state.streamStartTime[streamer] = stream.started_at;
+
           state.lastTitle[streamer] = title;
           state.lastCategory[streamer] = category;
         } else if (
@@ -258,7 +276,7 @@ async function main() {
       }
 
     } catch (err) {
-      await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`);
+      console.log(`Помилка для ${streamer}: ${err.message}`);
     }
   }
 

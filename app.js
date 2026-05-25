@@ -34,10 +34,20 @@ const streamers = [
   "tadzheek","dedadam","vitollo_13","ereek","dankzlv","bratishkinoff"
 ];
 
-let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {}, userId: {} };
+// ---------------- Ініціалізація state ----------------
+
+let state = {
+  onlineStatus: {},
+  streamStartTime: {},
+  lastTitle: {},
+  lastCategory: {},
+  userId: {} // ← ВАЖЛИВО: тепер завжди існує
+};
+
 if (fs.existsSync("state.json")) {
   try {
-    state = JSON.parse(fs.readFileSync("state.json", "utf8"));
+    const loaded = JSON.parse(fs.readFileSync("state.json", "utf8"));
+    state = { ...state, ...loaded };
   } catch {
     console.log("Помилка читання state.json, починаємо з нуля");
   }
@@ -173,7 +183,7 @@ async function main() {
           console.log("ONLINE:", streamer);
         }
 
-        // ---- Оновлення назви або категорії ----
+        // ---- Оновлення ----
         else if (
           state.lastTitle[streamer] !== title ||
           state.lastCategory[streamer] !== category
@@ -191,7 +201,7 @@ async function main() {
           const end = new Date().toISOString();
           const durationText = formatDuration(start, end);
 
-          // Топ‑3 кліпа за стрім
+          // Топ‑3 кліпа
           let topClipsText = "";
           try {
             const userId = state.userId[streamer] || (await getUserId(streamer, token));
@@ -207,13 +217,12 @@ async function main() {
                   )
                   .join("\n");
 
-              // зберігаємо в файл
-              const dateKey = start.slice(0, 10); // YYYY-MM-DD
+              // зберігаємо JSON
+              const dateKey = start.slice(0, 10);
               const dir = `data/${streamer}/clips`;
               ensureDir(dir);
-              const filePath = `${dir}/${dateKey}.json`;
               fs.writeFileSync(
-                filePath,
+                `${dir}/${dateKey}.json`,
                 JSON.stringify({ start, end, top3: topClips }, null, 2),
                 "utf8"
               );
@@ -221,8 +230,7 @@ async function main() {
               topClipsText = "\n\n🎬 Кліпів за цей стрім не знайдено.";
             }
           } catch (e) {
-            console.log("Помилка при отриманні кліпів для", streamer, ":", e.message);
-            topClipsText = "\n\n🎬 Не вдалося отримати кліпи для цього стріму.";
+            topClipsText = "\n\n🎬 Не вдалося отримати кліпи.";
           }
 
           await deleteMessage(state.onlineStatus[streamer]);
@@ -246,7 +254,6 @@ async function main() {
       }
 
     } catch (err) {
-      console.log("Помилка для", streamer, ":", err.message);
       await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`).catch(() => {});
     }
   }

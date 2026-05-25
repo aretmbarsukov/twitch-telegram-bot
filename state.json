@@ -1,6 +1,18 @@
 {
-  "onlineStatus": {},
-  "streamStartTime": {},
-  "lastTitle": {},
-  "lastCategory": {}
+  "onlineStatus": {
+    "anarabdullaev": 156,
+    "ant1ka": 157
+  },
+  "streamStartTime": {
+    "anarabdullaev": "2026-05-25T15:03:34.714Z",
+    "ant1ka": "2026-05-25T15:03:35.776Z"
+  },
+  "lastTitle": {
+    "anarabdullaev": "Я у деда в деревне, с Лерой, Сашей, Огром, Саня Поколение, Дрон, Жека немец, яблонька и пахан мой",
+    "ant1ka": "🍿 Доктор Стрэндж | Начало: 17:17 !тг !gta"
+  },
+  "lastCategory": {
+    "anarabdullaev": "IRL",
+    "ant1ka": "Just Chatting"
+  }
 }

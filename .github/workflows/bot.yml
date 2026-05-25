@@ -13,20 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
+
       - run: npm install
+
       - run: node app.js
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_SECRET: ${{ secrets.TWITCH_SECRET }}
+
       - name: Зберегти стан
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+          git pull --rebase
           git add state.json
           git diff --staged --quiet || git commit -m "Update state"
           git push

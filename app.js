@@ -1,18 +1,10 @@
-import express from "express";
 import axios from "axios";
-
-const app = express();
-app.use(express.json({ type: "*/*" }));
-
-process.on("uncaughtException", err => console.log("UNCAUGHT:", err));
-process.on("unhandledRejection", err => console.log("UNHANDLED:", err));
+import fs from "fs";
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_SECRET = process.env.TWITCH_SECRET;
-
-let accessToken = null;
 
 const streamers = [
   "steel","ravshann","renatko","steelaaga","ravshanbtw",
@@ -20,55 +12,80 @@ const streamers = [
   "tadzheek","dedadam","vitollo_13","ereek","dankzlv"
 ];
 
-let lastMessages = {};
-let onlineStatus = {};
+let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {} };
+if (fs.existsSync("state.json")) {
+  try {
+    state = JSON.parse(fs.readFileSync("state.json", "utf8"));
+  } catch(e) {
+    console.log("Помилка читання state.json, починаємо з нуля");
+  }
+}
 
 function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function formatDate(date) {
+  return new Date(date).toLocaleString("ru-RU", {
+    day:"2-digit", month:"2-digit", year:"numeric",
+    hour:"2-digit", minute:"2-digit"
+  });
+}
+
+function formatDuration(start) {
+  const ms = Date.now() - new Date(start).getTime();
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
 }
 
 async function getTwitchToken() {
-  try {
-    const res = await axios.post(
-      `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
-    );
-    accessToken = res.data.access_token;
-    console.log("Twitch token обновлён");
-  } catch (err) {
-    console.log("Ошибка получения токена:", err);
-  }
+  const res = await axios.post(
+    `https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_SECRET}&grant_type=client_credentials`
+  );
+  return res.data.access_token;
 }
 
-async function checkStreamer(streamer) {
-  try {
-    const res = await axios.get(
-      `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
-      {
-        headers: {
-          "Client-ID": TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${accessToken}`
-        }
-      }
-    );
-    return res.data.data.length > 0 ? res.data.data[0] : null;
-  } catch (err) {
-    console.log("API error:", err);
-    return null;
-  }
+async function checkStreamer(streamer, token) {
+  const res = await axios.get(
+    `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
+    { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
+  );
+  return res.data.data.length > 0 ? res.data.data[0] : null;
 }
 
-async function checkStreams() {
-  if (!accessToken) return;
-  console.log("🔍 Перевірка стримерів:", new Date().toLocaleTimeString("uk-UA"));
+async function sendMessage(text) {
+  const res = await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+    { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }
+  );
+  return res.data.result.message_id;
+}
+
+async function editMessage(messageId, text) {
+  await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
+    { chat_id: TELEGRAM_CHAT_ID, message_id: messageId, text, parse_mode: "HTML" }
+  );
+}
+
+async function deleteMessage(messageId) {
+  await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
+    { chat_id: TELEGRAM_CHAT_ID, message_id: messageId }
+  );
+}
+
+async function main() {
+  const token = await getTwitchToken();
+  console.log("🔍 Перевірка:", new Date().toLocaleTimeString("uk-UA"));
 
   for (const streamer of streamers) {
-    const stream = await checkStreamer(streamer);
+    try {
+      const stream = await checkStreamer(streamer, token);
 
-    if (stream) {
-      if (!onlineStatus[streamer]) {
+      if (stream) {
         const title = escapeHtml(stream.title || "Без названия");
         const category = escapeHtml(stream.game_name || "Без категории");
         const text =
@@ -77,38 +94,62 @@ async function checkStreams() {
           `📝 Название: ${title}\n` +
           `🔗 https://twitch.tv/${stream.user_login}`;
 
-        const msg = await axios.post(
-          `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-          { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }
-        );
-        lastMessages[streamer] = msg.data.result.message_id;
-        onlineStatus[streamer] = true;
-        console.log("ONLINE:", streamer);
-      }
-    } else {
-      if (onlineStatus[streamer]) {
-        if (lastMessages[streamer]) {
-          await axios.post(
-            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-            { chat_id: TELEGRAM_CHAT_ID, message_id: lastMessages[streamer] }
-          );
-          lastMessages[streamer] = null;
+        if (!state.onlineStatus[streamer]) {
+          // Вийшов онлайн — відправляємо нове повідомлення
+          const msgId = await sendMessage(text);
+          state.onlineStatus[streamer] = msgId;
+          state.streamStartTime[streamer] = new Date().toISOString();
+          state.lastTitle[streamer] = title;
+          state.lastCategory[streamer] = category;
+          console.log("ONLINE:", streamer);
+        } else if (
+          state.lastTitle[streamer] !== title ||
+          state.lastCategory[streamer] !== category
+        ) {
+          // Змінилась назва або категорія — оновлюємо повідомлення
+          await editMessage(state.onlineStatus[streamer], text);
+          state.lastTitle[streamer] = title;
+          state.lastCategory[streamer] = category;
+          console.log("UPDATED:", streamer);
         }
-        onlineStatus[streamer] = false;
-        console.log("OFFLINE:", streamer);
+
+      } else {
+        if (state.onlineStatus[streamer]) {
+          // Видаляємо онлайн повідомлення
+          await deleteMessage(state.onlineStatus[streamer]);
+
+          // Відправляємо підсумок
+          const offlineText =
+            `🔴 <b>${streamer}</b>\n` +
+            `Стрим завершён\n` +
+            `🟢 Начался: ${formatDate(state.streamStartTime[streamer])}\n` +
+            `🔴 Завершился: ${formatDate(new Date())}\n` +
+            `⏱️ Длился: ${formatDuration(state.streamStartTime[streamer])}`;
+
+          await sendMessage(offlineText);
+
+          state.onlineStatus[streamer] = null;
+          state.streamStartTime[streamer] = null;
+          state.lastTitle[streamer] = null;
+          state.lastCategory[streamer] = null;
+          console.log("OFFLINE:", streamer);
+        }
       }
+    } catch (err) {
+      console.log("Помилка для", streamer, ":", err.message);
+      await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`).catch(() => {});
     }
   }
+
+  fs.writeFileSync("state.json", JSON.stringify(state, null, 2));
+  console.log("✅ Готово");
 }
 
-app.get("/", (req, res) => {
-  res.send("Bot is running");
-});
-
-app.listen(process.env.PORT || 3000, async () => {
-  await getTwitchToken();
-  setInterval(getTwitchToken, 3 * 60 * 60 * 1000);
-  setInterval(checkStreams, 10 * 60 * 1000);
-  checkStreams();
-  console.log("Bot started");
+main().catch(async (err) => {
+  console.log("FATAL:", err.message);
+  await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+    { chat_id: TELEGRAM_CHAT_ID, text: `🚨 Бот впав:\n${err.message}`, parse_mode: "HTML" }
+  ).catch(() => {});
+  process.exit(1);
 });

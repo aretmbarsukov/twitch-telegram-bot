@@ -9,7 +9,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 const streamers = [
   "steel","ravshann","renatko","steelaaga","ravshanbtw",
   "anarabdullaev","kerimch1k","renatkobmw","blslan",
-  "tadzheek","dedadam","vitollo_13","ereek","dankzlv"
+  "tadzheek","dedadam","vitollo_13","ereek","dankzlv","shadowkekw"
 ];
 
 let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {} };

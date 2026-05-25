@@ -34,7 +34,7 @@ const streamers = [
   "tadzheek","dedadam","vitollo_13","ereek","dankzlv","bratishkinoff"
 ];
 
-let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {} };
+let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {}, userId: {} };
 if (fs.existsSync("state.json")) {
   try {
     state = JSON.parse(fs.readFileSync("state.json", "utf8"));
@@ -56,12 +56,16 @@ function formatDate(date) {
   });
 }
 
-function formatDuration(start) {
-  const ms = Date.now() - new Date(start).getTime();
+function formatDuration(start, end) {
+  const ms = new Date(end).getTime() - new Date(start).getTime();
   const totalMin = Math.floor(ms / 60000);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+}
+
+function ensureDir(path) {
+  fs.mkdirSync(path, { recursive: true });
 }
 
 async function getTwitchToken() {
@@ -71,12 +75,46 @@ async function getTwitchToken() {
   return res.data.access_token;
 }
 
+async function getUserId(login, token) {
+  const res = await axios.get(
+    `https://api.twitch.tv/helix/users?login=${login}`,
+    { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
+  );
+  return res.data.data.length ? res.data.data[0].id : null;
+}
+
 async function checkStreamer(streamer, token) {
   const res = await axios.get(
     `https://api.twitch.tv/helix/streams?user_login=${streamer}`,
     { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
   );
   return res.data.data.length > 0 ? res.data.data[0] : null;
+}
+
+async function getTopClipsForStream(streamer, userId, startIso, endIso, token) {
+  if (!userId) return [];
+
+  const params = new URLSearchParams({
+    broadcaster_id: userId,
+    started_at: startIso,
+    ended_at: endIso,
+    first: "100"
+  });
+
+  const res = await axios.get(
+    `https://api.twitch.tv/helix/clips?${params.toString()}`,
+    { headers: { "Client-ID": TWITCH_CLIENT_ID, Authorization: `Bearer ${token}` } }
+  );
+
+  const clips = res.data.data || [];
+  if (!clips.length) return [];
+
+  clips.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+  return clips.slice(0, 3).map(c => ({
+    title: c.title,
+    url: c.url,
+    views: c.view_count
+  }));
 }
 
 async function sendMessage(text) {
@@ -114,12 +152,16 @@ async function main() {
       if (stream) {
         const title = escapeHtml(stream.title || "Без названия");
         const category = escapeHtml(stream.game_name || "Без категории");
+        const userLogin = stream.user_login;
+        const userId = stream.user_id;
+
+        state.userId[streamer] = userId;
 
         const text =
-          `🟢 <b>${stream.user_login}</b>\n` +
+          `🟢 <b>${userLogin}</b>\n` +
           `🎮 Категория: <b>${category}</b>\n` +
           `📝 Название: ${title}\n` +
-          `🔗 https://twitch.tv/${stream.user_login}`;
+          `🔗 https://twitch.tv/${userLogin}`;
 
         // ---- Новий стрім ----
         if (!state.onlineStatus[streamer]) {
@@ -145,14 +187,53 @@ async function main() {
       } else {
         // ---- Стрімер офлайн ----
         if (state.onlineStatus[streamer]) {
+          const start = state.streamStartTime[streamer];
+          const end = new Date().toISOString();
+          const durationText = formatDuration(start, end);
+
+          // Топ‑3 кліпа за стрім
+          let topClipsText = "";
+          try {
+            const userId = state.userId[streamer] || (await getUserId(streamer, token));
+            const topClips = await getTopClipsForStream(streamer, userId, start, end, token);
+
+            if (topClips.length) {
+              topClipsText =
+                "\n\n🎬 <b>Топ 3 клипа за стрим:</b>\n" +
+                topClips
+                  .map(
+                    (c, i) =>
+                      `${i + 1}) ${escapeHtml(c.title)} — <b>${c.views}</b> просмотров\n${c.url}`
+                  )
+                  .join("\n");
+
+              // зберігаємо в файл
+              const dateKey = start.slice(0, 10); // YYYY-MM-DD
+              const dir = `data/${streamer}/clips`;
+              ensureDir(dir);
+              const filePath = `${dir}/${dateKey}.json`;
+              fs.writeFileSync(
+                filePath,
+                JSON.stringify({ start, end, top3: topClips }, null, 2),
+                "utf8"
+              );
+            } else {
+              topClipsText = "\n\n🎬 Кліпів за цей стрім не знайдено.";
+            }
+          } catch (e) {
+            console.log("Помилка при отриманні кліпів для", streamer, ":", e.message);
+            topClipsText = "\n\n🎬 Не вдалося отримати кліпи для цього стріму.";
+          }
+
           await deleteMessage(state.onlineStatus[streamer]);
 
           const offlineText =
             `🔴 <b>${streamer}</b>\n` +
             `Стрим завершён\n` +
-            `🟢 Начался: ${formatDate(state.streamStartTime[streamer])}\n` +
-            `🔴 Завершился: ${formatDate(new Date())}\n` +
-            `⏱️ Длился: ${formatDuration(state.streamStartTime[streamer])}`;
+            `🟢 Начался: ${formatDate(start)}\n` +
+            `🔴 Завершился: ${formatDate(end)}\n` +
+            `⏱️ Длился: ${durationText}` +
+            topClipsText;
 
           await sendMessage(offlineText);
 

@@ -1,6 +1,28 @@
 import axios from "axios";
 import fs from "fs";
 
+// ---------------- Глобальні ловці помилок ----------------
+
+async function sendFatal(text) {
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
+      { chat_id: process.env.TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }
+    );
+  } catch {}
+}
+
+process.on("unhandledRejection", async (reason) => {
+  await sendFatal(`⚠️ <b>Неперехоплена помилка:</b>\n${reason}`);
+});
+
+process.on("uncaughtException", async (err) => {
+  await sendFatal(`🔥 <b>Критична помилка:</b>\n${err.message}`);
+  process.exit(1);
+});
+
+// ---------------- Основні змінні ----------------
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
@@ -9,17 +31,19 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 const streamers = [
   "steel","ravshann","renatko","steelaaga","ravshanbtw",
   "anarabdullaev","kerimch1k","renatkobmw","blslan",
-  "tadzheek","dedadam","vitollo_13","ereek","dankzlv","shadowkekw"
+  "tadzheek","dedadam","vitollo_13","ereek","dankzlv"
 ];
 
 let state = { onlineStatus: {}, streamStartTime: {}, lastTitle: {}, lastCategory: {} };
 if (fs.existsSync("state.json")) {
   try {
     state = JSON.parse(fs.readFileSync("state.json", "utf8"));
-  } catch(e) {
+  } catch {
     console.log("Помилка читання state.json, починаємо з нуля");
   }
 }
+
+// ---------------- Допоміжні функції ----------------
 
 function escapeHtml(text) {
   return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -77,6 +101,8 @@ async function deleteMessage(messageId) {
   );
 }
 
+// ---------------- Основна логіка ----------------
+
 async function main() {
   const token = await getTwitchToken();
   console.log("🔍 Перевірка:", new Date().toLocaleTimeString("uk-UA"));
@@ -88,25 +114,28 @@ async function main() {
       if (stream) {
         const title = escapeHtml(stream.title || "Без названия");
         const category = escapeHtml(stream.game_name || "Без категории");
+
         const text =
           `🟢 <b>${stream.user_login}</b>\n` +
           `🎮 Категория: <b>${category}</b>\n` +
           `📝 Название: ${title}\n` +
           `🔗 https://twitch.tv/${stream.user_login}`;
 
+        // ---- Новий стрім ----
         if (!state.onlineStatus[streamer]) {
-          // Вийшов онлайн — відправляємо нове повідомлення
           const msgId = await sendMessage(text);
           state.onlineStatus[streamer] = msgId;
           state.streamStartTime[streamer] = new Date().toISOString();
           state.lastTitle[streamer] = title;
           state.lastCategory[streamer] = category;
           console.log("ONLINE:", streamer);
-        } else if (
+        }
+
+        // ---- Оновлення назви або категорії ----
+        else if (
           state.lastTitle[streamer] !== title ||
           state.lastCategory[streamer] !== category
         ) {
-          // Змінилась назва або категорія — оновлюємо повідомлення
           await editMessage(state.onlineStatus[streamer], text);
           state.lastTitle[streamer] = title;
           state.lastCategory[streamer] = category;
@@ -114,11 +143,10 @@ async function main() {
         }
 
       } else {
+        // ---- Стрімер офлайн ----
         if (state.onlineStatus[streamer]) {
-          // Видаляємо онлайн повідомлення
           await deleteMessage(state.onlineStatus[streamer]);
 
-          // Відправляємо підсумок
           const offlineText =
             `🔴 <b>${streamer}</b>\n` +
             `Стрим завершён\n` +
@@ -135,6 +163,7 @@ async function main() {
           console.log("OFFLINE:", streamer);
         }
       }
+
     } catch (err) {
       console.log("Помилка для", streamer, ":", err.message);
       await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`).catch(() => {});
@@ -146,10 +175,6 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  console.log("FATAL:", err.message);
-  await axios.post(
-    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-    { chat_id: TELEGRAM_CHAT_ID, text: `🚨 Бот впав:\n${err.message}`, parse_mode: "HTML" }
-  ).catch(() => {});
+  await sendFatal(`🚨 <b>Бот впав:</b>\n${err.message}`);
   process.exit(1);
 });

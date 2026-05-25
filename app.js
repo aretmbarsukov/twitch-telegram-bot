@@ -41,7 +41,7 @@ let state = {
   streamStartTime: {},
   lastTitle: {},
   lastCategory: {},
-  userId: {} // ← ВАЖЛИВО: тепер завжди існує
+  userId: {}
 };
 
 if (fs.existsSync("state.json")) {
@@ -59,6 +59,10 @@ function escapeHtml(text) {
   return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
+function ensureDir(path) {
+  fs.mkdirSync(path, { recursive: true });
+}
+
 function formatDate(date) {
   return new Date(date).toLocaleString("ru-RU", {
     day:"2-digit", month:"2-digit", year:"numeric",
@@ -72,10 +76,6 @@ function formatDuration(start, end) {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
-}
-
-function ensureDir(path) {
-  fs.mkdirSync(path, { recursive: true });
 }
 
 async function getTwitchToken() {
@@ -101,7 +101,7 @@ async function checkStreamer(streamer, token) {
   return res.data.data.length > 0 ? res.data.data[0] : null;
 }
 
-async function getTopClipsForStream(streamer, userId, startIso, endIso, token) {
+async function getTopClips(userId, startIso, endIso, token) {
   if (!userId) return [];
 
   const params = new URLSearchParams({
@@ -135,17 +135,17 @@ async function sendMessage(text) {
   return res.data.result.message_id;
 }
 
-async function editMessage(messageId, text) {
+async function editMessage(id, text) {
   await axios.post(
     `https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`,
-    { chat_id: TELEGRAM_CHAT_ID, message_id: messageId, text, parse_mode: "HTML" }
+    { chat_id: TELEGRAM_CHAT_ID, message_id: id, text, parse_mode: "HTML" }
   );
 }
 
-async function deleteMessage(messageId) {
+async function deleteMessage(id) {
   await axios.post(
     `https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteMessage`,
-    { chat_id: TELEGRAM_CHAT_ID, message_id: messageId }
+    { chat_id: TELEGRAM_CHAT_ID, message_id: id }
   );
 }
 
@@ -153,7 +153,6 @@ async function deleteMessage(messageId) {
 
 async function main() {
   const token = await getTwitchToken();
-  console.log("🔍 Перевірка:", new Date().toLocaleTimeString("uk-UA"));
 
   for (const streamer of streamers) {
     try {
@@ -162,104 +161,108 @@ async function main() {
       if (stream) {
         const title = escapeHtml(stream.title || "Без названия");
         const category = escapeHtml(stream.game_name || "Без категории");
-        const userLogin = stream.user_login;
         const userId = stream.user_id;
 
         state.userId[streamer] = userId;
 
         const text =
-          `🟢 <b>${userLogin}</b>\n` +
+          `🟢 <b>${stream.user_login}</b>\n` +
           `🎮 Категория: <b>${category}</b>\n` +
           `📝 Название: ${title}\n` +
-          `🔗 https://twitch.tv/${userLogin}`;
+          `🔗 https://twitch.tv/${stream.user_login}`;
 
-        // ---- Новий стрім ----
         if (!state.onlineStatus[streamer]) {
           const msgId = await sendMessage(text);
           state.onlineStatus[streamer] = msgId;
           state.streamStartTime[streamer] = new Date().toISOString();
           state.lastTitle[streamer] = title;
           state.lastCategory[streamer] = category;
-          console.log("ONLINE:", streamer);
-        }
-
-        // ---- Оновлення ----
-        else if (
+        } else if (
           state.lastTitle[streamer] !== title ||
           state.lastCategory[streamer] !== category
         ) {
           await editMessage(state.onlineStatus[streamer], text);
           state.lastTitle[streamer] = title;
           state.lastCategory[streamer] = category;
-          console.log("UPDATED:", streamer);
         }
 
       } else {
-        // ---- Стрімер офлайн ----
         if (state.onlineStatus[streamer]) {
           const start = state.streamStartTime[streamer];
           const end = new Date().toISOString();
-          const durationText = formatDuration(start, end);
+          const duration = formatDuration(start, end);
 
-          // Топ‑3 кліпа
-          let topClipsText = "";
-          try {
-            const userId = state.userId[streamer] || (await getUserId(streamer, token));
-            const topClips = await getTopClipsForStream(streamer, userId, start, end, token);
+          const userId = state.userId[streamer] || (await getUserId(streamer, token));
+          const top3 = await getTopClips(userId, start, end, token);
 
-            if (topClips.length) {
-              topClipsText =
-                "\n\n🎬 <b>Топ 3 клипа за стрим:</b>\n" +
-                topClips
-                  .map(
-                    (c, i) =>
-                      `${i + 1}) ${escapeHtml(c.title)} — <b>${c.views}</b> просмотров\n${c.url}`
-                  )
-                  .join("\n");
+          // ---------------- ЗБЕРІГАЄМО СПОВІЩЕННЯ ----------------
+          const notifDir = `data/notifications/${streamer}`;
+          ensureDir(notifDir);
 
-              // зберігаємо JSON
-              const dateKey = start.slice(0, 10);
-              const dir = `data/${streamer}/clips`;
-              ensureDir(dir);
-              fs.writeFileSync(
-                `${dir}/${dateKey}.json`,
-                JSON.stringify({ start, end, top3: topClips }, null, 2),
-                "utf8"
-              );
-            } else {
-              topClipsText = "\n\n🎬 Кліпів за цей стрім не знайдено.";
-            }
-          } catch (e) {
-            topClipsText = "\n\n🎬 Не вдалося отримати кліпи.";
-          }
+          const notifData = {
+            start,
+            end,
+            duration,
+            title: state.lastTitle[streamer],
+            category: state.lastCategory[streamer],
+            telegram_message: `Стрим завершён. Длился: ${duration}`
+          };
 
-          await deleteMessage(state.onlineStatus[streamer]);
+          fs.writeFileSync(
+            `${notifDir}/${start.slice(0, 10)}.json`,
+            JSON.stringify(notifData, null, 2)
+          );
+
+          // ---------------- ЗБЕРІГАЄМО ІНФУ ПРО СТРІМ ----------------
+          const streamDir = `data/streams/${streamer}`;
+          ensureDir(streamDir);
+
+          const streamData = {
+            start,
+            end,
+            duration,
+            titles: [state.lastTitle[streamer]],
+            categories: [state.lastCategory[streamer]],
+            top3
+          };
+
+          fs.writeFileSync(
+            `${streamDir}/${start.slice(0, 10)}.json`,
+            JSON.stringify(streamData, null, 2)
+          );
+
+          // ---------------- ВІДПРАВЛЯЄМО В TELEGRAM ----------------
+          let clipsText = top3.length
+            ? top3
+                .map((c, i) => `${i + 1}) ${c.title} — ${c.views} просмотров\n${c.url}`)
+                .join("\n\n")
+            : "Кліпів не знайдено.";
 
           const offlineText =
             `🔴 <b>${streamer}</b>\n` +
             `Стрим завершён\n` +
             `🟢 Начался: ${formatDate(start)}\n` +
             `🔴 Завершился: ${formatDate(end)}\n` +
-            `⏱️ Длился: ${durationText}` +
-            topClipsText;
+            `⏱️ Длился: ${duration}\n\n` +
+            `🎬 <b>Топ 3 клипа:</b>\n${clipsText}`;
 
+          await deleteMessage(state.onlineStatus[streamer]);
           await sendMessage(offlineText);
 
+          // ---------------- ОЧИЩАЄМО СТАН ----------------
           state.onlineStatus[streamer] = null;
           state.streamStartTime[streamer] = null;
           state.lastTitle[streamer] = null;
           state.lastCategory[streamer] = null;
-          console.log("OFFLINE:", streamer);
         }
       }
 
     } catch (err) {
-      await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`).catch(() => {});
+      await sendMessage(`⚠️ Помилка бота для <b>${streamer}</b>:\n${err.message}`);
     }
   }
 
   fs.writeFileSync("state.json", JSON.stringify(state, null, 2));
-  console.log("✅ Готово");
 }
 
 main().catch(async (err) => {

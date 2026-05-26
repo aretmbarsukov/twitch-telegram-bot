@@ -70,10 +70,15 @@ function escapeHtml(text) {
   return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
+// Московський час
 function formatDate(date) {
   return new Date(date).toLocaleString("ru-RU", {
-    day:"2-digit", month:"2-digit", year:"numeric",
-    hour:"2-digit", minute:"2-digit"
+    timeZone: "Europe/Moscow",
+    day:"2-digit",
+    month:"2-digit",
+    year:"numeric",
+    hour:"2-digit",
+    minute:"2-digit"
   });
 }
 
@@ -190,7 +195,7 @@ async function main() {
           const msgId = await sendMessage(text);
           state.onlineStatus[streamer] = msgId;
 
-          // ВАЖЛИВО: правильний час початку
+          // ВАЖЛИВО: правильний час початку стріму
           state.streamStartTime[streamer] = stream.started_at;
 
           state.lastTitle[streamer] = title;

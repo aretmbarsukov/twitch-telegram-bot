@@ -31,7 +31,7 @@ const TWITCH_SECRET = process.env.TWITCH_SECRET;
 const streamers = [
   "steel","ravshann","renatko","steelaaga","ravshanbtw",
   "anarabdullaev","kerimch1k","renatkobmw","blslan",
-  "tadzheek","DedAdam","vitollo_13","ereek","dankzlv","bratishkinoff"
+  "tadzheek","dedadam","vitollo_13","ereek","dankzlv","bratishkinoff"
 ];
 
 // ---------------- Ініціалізація state ----------------
@@ -185,17 +185,18 @@ async function main() {
 
         state.userId[streamer] = userId;
 
+        // ---------------- СТИЛЬНЕ ПОВІДОМЛЕННЯ ----------------
         const text =
-          `🟢 <b>${stream.user_login}</b>\n` +
-          `🎮 Категория: <b>${category}</b>\n` +
-          `📝 Название: ${title}\n` +
-          `🔗 https://twitch.tv/${stream.user_login}`;
+          `🟣 <b>LIVE: ${stream.user_login}</b>\n\n` +
+          `🎮 <b>Категория —</b> ${category}\n` +
+          `📝 <b>${title}</b>\n\n` +
+          `https://twitch.tv/${stream.user_login}`;
 
         if (!state.onlineStatus[streamer]) {
           const msgId = await sendMessage(text);
           state.onlineStatus[streamer] = msgId;
 
-          // ВАЖЛИВО: правильний час початку стріму
+          // Правильний час початку
           state.streamStartTime[streamer] = stream.started_at;
 
           state.lastTitle[streamer] = title;

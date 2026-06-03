@@ -26,10 +26,11 @@ jobs:
       - name: Run bot
         run: node app.js
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-          TWITCH_SECRET: ${{ secrets.TWITCH_SECRET }}
+  TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+  TWITCH_SECRET: ${{ secrets.TWITCH_SECRET }}
+  CHANNEL_NAME: ${{ secrets.CHANNEL_NAME }}
 
       - name: Зберегти стан
         run: |

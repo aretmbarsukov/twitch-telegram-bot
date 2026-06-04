@@ -1,6 +1,5 @@
-// import dotenv from "dotenv";
-// dotenv.config();
-
+import dotenv from "dotenv";
+dotenv.config();
 import axios from "axios";
 import fs from "fs";
 
@@ -10,6 +9,13 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_SECRET = process.env.TWITCH_SECRET;
 const CHANNEL_NAME = process.env.CHANNEL_NAME;
+
+// === ПЕРЕВІРКА ЗМІННИХ ===
+console.log("TOKEN:", TELEGRAM_TOKEN ? "є" : "❌ немає");
+console.log("CHAT_ID:", TELEGRAM_CHAT_ID ? "є" : "❌ немає");
+console.log("TWITCH_ID:", TWITCH_CLIENT_ID ? "є" : "❌ немає");
+console.log("TWITCH_SECRET:", TWITCH_SECRET ? "є" : "❌ немає");
+console.log("CHANNEL:", CHANNEL_NAME ? "є" : "❌ немає");
 
 // === STATE ===
 let state = {};
@@ -64,22 +70,17 @@ async function checkStream(token) {
       },
     }
   );
-
   return res.data.data.length > 0 ? res.data.data[0] : null;
 }
 
 // === MAIN ===
 async function main() {
   console.log("▶ Старт перевірки…");
-
   const token = await getTwitchToken();
   console.log("✔ Twitch токен отримано");
-
   const stream = await checkStream(token);
-
   if (stream) {
     console.log("🔴 Стрімер онлайн:", stream.title);
-
     if (!state.live) {
       await sendMessage(
         `🔴 <b>${CHANNEL_NAME}</b> зараз онлайн!\n\n<b>${stream.title}</b>\nhttps://twitch.tv/${CHANNEL_NAME}`
@@ -89,7 +90,6 @@ async function main() {
     }
   } else {
     console.log("⚪ Стрімер офлайн");
-
     if (state.live) {
       await sendMessage(`⚪ <b>${CHANNEL_NAME}</b> пішов офлайн`);
       state.live = false;
@@ -104,14 +104,14 @@ async function loop() {
     try {
       await main();
     } catch (err) {
+      console.log("Помилка:", err.message);
       await sendFatal(err.message);
     }
     await new Promise((res) => setTimeout(res, 60000)); // 60 сек
   }
 }
 
-// Якщо запускається в Termux — працює нескінченно
-// Якщо запускається в GitHub Actions — виконує один цикл і завершується
+// GitHub Actions — один запуск, Termux — нескінченний цикл
 if (process.env.GITHUB_ACTIONS) {
   main();
 } else {

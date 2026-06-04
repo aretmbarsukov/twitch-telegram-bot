@@ -32,6 +32,7 @@ jobs:
   TWITCH_SECRET: ${{ secrets.TWITCH_SECRET }}
   CHANNEL_NAME: ${{ secrets.CHANNEL_NAME }}
 
+
       - name: Зберегти стан
         run: |
           git config user.name "github-actions"
